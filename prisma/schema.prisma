@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Professor {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  courses   Course[]
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  ects      Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  courses   Course[]
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  capacity  Int?
+  isOnline  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Cycle {
+  id        String   @id @default(cuid())
+  name      String
+  dateStart DateTime
+  dateEnd   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  terms     Term[]
+}
+
+model Term {
+  id        String   @id @default(cuid())
+  cycle     Cycle    @relation(fields: [cycleId], references: [id])
+  cycleId   String
+  name      String
+  dateStart DateTime?
+  dateEnd   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  courses   Course[]
+}
+
+model StudyProgram {
+  id        String       @id @default(cuid())
+  name      String
+  code      String?      @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  years     ProgramYear[]
+}
+
+model ProgramYear {
+  id           String       @id @default(cuid())
+  program      StudyProgram @relation(fields: [programId], references: [id])
+  programId    String
+  yearNumber   Int
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Course {
+  id          String    @id @default(cuid())
+  subject     Subject   @relation(fields: [subjectId], references: [id])
+  subjectId   String
+  professor   Professor @relation(fields: [professorId], references: [id])
+  professorId String
+  term        Term      @relation(fields: [termId], references: [id])
+  termId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
