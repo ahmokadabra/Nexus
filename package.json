@@ -13,7 +13,9 @@
    "db:migrate": "prisma migrate dev --name init",
    "prisma:generate": "prisma generate",
    "prisma:studio": "prisma studio",
-   "seed": "node scripts/seed.js"
+   "seed": "node scripts/seed.js",
+   "start:render": "node src/index.js"
+
 },
   "keywords": [
     "express",
