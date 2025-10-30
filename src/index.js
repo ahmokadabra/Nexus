@@ -14,10 +14,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoint — Render koristi ovo da vidi da li je app online
+// Health check endpoints
 app.get("/api/health", (_req, res) => 
   res.json({ ok: true, ts: new Date().toISOString(), app: "Nexus" })
 );
+app.get("/healthz", (_req, res) => res.status(200).send("OK"));
+
 
 // Routes
 app.use("/api/subjects", subjectsRouter);
