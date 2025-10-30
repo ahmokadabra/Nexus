@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Render build script (fix Prisma permissions)
+# Render build script for Nexus backend (no server start here!)
 
-echo "Installing dependencies..."
+set -e
+
+echo "🏗️ Installing dependencies..."
 npm install
 
-echo "Fixing Prisma permissions..."
-chmod +x ./node_modules/.bin/prisma
+echo "🔧 Fixing Prisma CLI permissions..."
+chmod +x ./node_modules/.bin/prisma || true
 
-echo "Generating Prisma Client for Linux..."
-npx prisma generate
+echo "🧩 Generating Prisma Client for Linux..."
+npx prisma generate --schema=./prisma/schema.prisma
 
-echo "Starting app..."
-node src/index.js
+echo "✅ Build step finished."
