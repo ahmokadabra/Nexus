@@ -1,6 +1,6 @@
-﻿import "dotenv/config";
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
+import "dotenv/config";
 
 import entriesRouter from "./routes/entries.js";
 import { router as subjectsRouter } from "./routes/subjects.js";
@@ -14,25 +14,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check endpoints
-app.get("/api/health", (_req, res) => 
-  res.json({ ok: true, ts: new Date().toISOString(), app: "Nexus" })
-);
+// ✅ Health check endpoints for Render
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, ts: new Date().toISOString(), app: "Nexus" });
+});
 app.get("/healthz", (_req, res) => res.status(200).send("OK"));
 
-
-// Routes
+// ✅ Routers
+app.use("/api/entries", entriesRouter);
 app.use("/api/subjects", subjectsRouter);
 app.use("/api/professors", professorsRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/cycles", cyclesRouter);
 app.use("/api/programs", programsRouter);
 app.use("/api/courses", coursesRouter);
-app.use("/api/entries", entriesRouter);
 
-// Listen on all interfaces, not just localhost
+// ✅ Properly listen on 0.0.0.0 (Render requires this!)
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Nexus API running on port ${PORT}`);
 });
-
