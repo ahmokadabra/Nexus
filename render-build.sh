@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Render build script for Nexus backend (no server start here!)
-
+# Build only – NO server start here
 set -e
 
 echo "🏗️ Installing dependencies..."
@@ -11,5 +10,8 @@ chmod +x ./node_modules/.bin/prisma || true
 
 echo "🧩 Generating Prisma Client for Linux..."
 npx prisma generate --schema=./prisma/schema.prisma
+
+echo "📦 Applying Prisma migrations to Neon..."
+npx prisma migrate deploy --schema=./prisma/schema.prisma
 
 echo "✅ Build step finished."
