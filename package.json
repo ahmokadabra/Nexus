@@ -1,24 +1,17 @@
 {
   "name": "nexus",
   "version": "1.0.0",
-  "description": "Nexus backend API with Express, Prisma, and PostgreSQL",
+  "description": "",
   "main": "src/index.js",
-  "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
+    "db:migrate": "prisma migrate dev --name init",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
-    "db:migrate": "prisma migrate dev --name init",
     "seed": "node scripts/seed.js"
   },
-  "keywords": [
-    "express",
-    "prisma",
-    "postgresql",
-    "api",
-    "nexus"
-  ],
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -31,5 +24,10 @@
   "devDependencies": {
     "nodemon": "^3.1.10",
     "prisma": "^6.17.1"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18.x"
   }
 }
+
