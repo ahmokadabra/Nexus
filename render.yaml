@@ -1,7 +1,7 @@
-services:
+﻿services:
   - name: nexus-backend
     type: web
-    runtime: node
+    env: node
     region: frankfurt
     plan: free
     rootDir: .
@@ -9,28 +9,24 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL   # postavi vrijednost nakon kreiranja (Neon)
+      - key: DATABASE_URL        # postavi vrijednost nakon kreiranja (Neon URI sa sslmode=require)
         sync: false
     buildCommand: |
       npm ci || npm i
-      chmod -R +x node_modules/.bin || true
-      node ./node_modules/prisma/build/index.js generate
-      node ./node_modules/prisma/build/index.js migrate deploy
+      npx prisma generate
+      npx prisma migrate deploy
     startCommand: node src/index.js
     healthCheckPath: /healthz
 
   - name: nexus-frontend
-    type: static_site
-    rootDir: frontend
-    plan: free
+    type: web
+    env: node
     region: frankfurt
+    plan: free
+    rootDir: frontend
     autoDeploy: true
-    buildCommand: npm ci && npm run build
-    publishPath: dist
     envVars:
-      - key: VITE_API_URL   # postavi nakon kreiranja (URL backend servisa)
+      - key: VITE_API_URL        # postavi nakon kreiranja (URL backend servisa)
         sync: false
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    buildCommand: npm ci && npm run build
+    startCommand: npx serve -s dist -l 
