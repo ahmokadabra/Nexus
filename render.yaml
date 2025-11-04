@@ -9,10 +9,11 @@
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL        # postavi vrijednost nakon kreiranja (Neon URI sa sslmode=require)
+      - key: DATABASE_URL        # popuni u Renderu (Neon pooled URI sa sslmode=require)
         sync: false
     buildCommand: |
       npm ci || npm i
+      chmod +x node_modules/.bin/prisma || true
       npx prisma generate
       npx prisma migrate deploy
     startCommand: node src/index.js
@@ -26,7 +27,7 @@
     rootDir: frontend
     autoDeploy: true
     envVars:
-      - key: VITE_API_URL        # postavi nakon kreiranja (URL backend servisa)
+      - key: VITE_API_URL        # popuni u Renderu (URL backend servisa, bez završne /)
         sync: false
     buildCommand: npm ci && npm run build
-    startCommand: npx serve -s dist -l 
+    startCommand: npx serve -s dist -l $PORT
