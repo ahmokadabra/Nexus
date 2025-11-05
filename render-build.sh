@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Build only – NO server start here
 set -e
 
-echo "🏗️ Installing dependencies..."
-npm install
+echo "Installing dependencies..."
+npm ci || npm i
 
-echo "🔧 Fixing Prisma CLI permissions..."
-chmod +x ./node_modules/.bin/prisma || true
+echo "Fixing Prisma permissions..."
+chmod -R +x node_modules/.bin || true
 
-echo "🧩 Generating Prisma Client for Linux..."
-npx prisma generate --schema=./prisma/schema.prisma
+echo "Generate Prisma Client for Linux..."
+node ./node_modules/prisma/build/index.js generate
 
-echo "📦 Applying Prisma migrations to Neon..."
-npx prisma migrate deploy --schema=./prisma/schema.prisma
+echo "Apply Prisma migrations (deploy)..."
+node ./node_modules/prisma/build/index.js migrate deploy
 
-echo "✅ Build step finished."
+echo "Build step finished."

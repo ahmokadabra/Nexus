@@ -1,57 +1,62 @@
 ﻿import { Router } from "express";
-import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { prisma } from "../prisma.js";
 
 export const router = Router();
-const prisma = new PrismaClient();
 
-const bodySchema = z.object({
-  name: z.string().min(1),
-  email: z
-    .string()
-    .email()
-    .optional()
-    .or(z.literal(""))
-    .transform((v) => v || undefined),
-  phone: z
-    .string()
-    .optional()
-    .or(z.literal(""))
-    .transform((v) => v || undefined),
+// Dozvoljavamo prazan ili bilo kakav e-mail/telefon
+const professorSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  email: z.string().optional(),  // NEMA .email()
+  phone: z.string().optional()
 });
 
-// GET /api/professors
-router.get("/", async (_req, res, next) => {
-  try {
-    const data = await prisma.professor.findMany({
-      orderBy: { createdAt: "desc" },
-    });
-    res.json(data);
-  } catch (err) {
-    next(err);
+router.get("/", async (_req, res) => {
+  const list = await prisma.professor.findMany({
+    orderBy: { createdAt: "desc" }
+  });
+  res.json(list);
+});
+
+router.post("/", async (req, res) => {
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
   }
-});
 
-// POST /api/professors
-router.post("/", async (req, res, next) => {
   try {
-    const data = bodySchema.parse(req.body);
-    const created = await prisma.professor.create({ data });
+    const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
-  } catch (err) {
-    if (err?.code === "P2002") {
-      return res.status(409).json({ message: "Email već postoji" });
-    }
-    next(err);
+  } catch (e) {
+    // npr. unique email kolizija i sl.
+    res.status(400).json({ message: "DB error", detail: e.message });
   }
 });
 
-// DELETE /api/professors/:id (opcionalno)
-router.delete("/:id", async (req, res, next) => {
+router.get("/:id", async (req, res) => {
+  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
+  if (!item) return res.status(404).json({ message: "Not found" });
+  res.json(item);
+});
+
+router.put("/:id", async (req, res) => {
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Validation error", errors: parsed.error.flatten() });
+  }
+  try {
+    const updated = await prisma.professor.update({ where: { id: req.params.id }, data: parsed.data });
+    res.json(updated);
+  } catch (e) {
+    res.status(400).json({ message: "Cannot update", detail: e.message });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
   try {
     await prisma.professor.delete({ where: { id: req.params.id } });
-    res.status(204).end();
-  } catch (err) {
-    next(err);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ message: "Cannot delete", detail: e.message });
   }
 });

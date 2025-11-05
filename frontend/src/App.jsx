@@ -4,6 +4,7 @@ import SubjectForm from "./components/SubjectForm";
 import RoomForm from "./components/RoomForm";
 import CycleForm from "./components/CycleForm";
 import ProgramForm from "./components/ProgramForm";
+import CourseForm from "./components/CourseForm";   // ⬅ novo
 import "./App.css";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <button className="btn" onClick={() => setView("rooms")}>Rooms</button>
           <button className="btn" onClick={() => setView("cycles")}>Cycles</button>
           <button className="btn" onClick={() => setView("programs")}>Programs</button>
+          <button className="btn" onClick={() => setView("courses")}>Courses</button> {/* ⬅ novo */}
         </div>
       </div>
 
@@ -28,6 +30,7 @@ export default function App() {
         {view === "rooms" && <RoomForm />}
         {view === "cycles" && <CycleForm />}
         {view === "programs" && <ProgramForm />}
+        {view === "courses" && <CourseForm />}      {/* ⬅ novo */}
       </div>
     </div>
   );

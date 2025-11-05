@@ -1,44 +1,49 @@
-﻿import React, { useState, useEffect } from "react";
+﻿import React, { useEffect, useState } from "react";
+import { apiGet, apiPost } from "../lib/api";
 
 export default function ProfessorForm() {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");   // optional
+  const [phone, setPhone] = useState("");   // optional
   const [msg, setMsg] = useState(null);
   const [list, setList] = useState([]);
-
-  useEffect(() => { fetchList(); }, []);
+  const [loading, setLoading] = useState(false);
 
   async function fetchList() {
+    setLoading(true);
     try {
-      const res = await fetch("/api/professors");
-      if (!res.ok) throw new Error("Failed to load");
-      const data = await res.json();
-      setList(data);
-    } catch {
+      const data = await apiGet("/api/professors");
+      // osiguraj da je niz
+      setList(Array.isArray(data) ? data : []);
+      setMsg(null);
+    } catch (e) {
       setList([]);
+      setMsg({ type: "err", text: e.message || "Failed to load" });
+    } finally {
+      setLoading(false);
     }
   }
+
+  useEffect(() => {
+    fetchList();
+  }, []);
 
   async function submit(e) {
     e.preventDefault();
     setMsg(null);
     try {
-      const res = await fetch("/api/professors", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, phone })
+      await apiPost("/api/professors", {
+        name,
+        email: email || undefined,
+        phone: phone || undefined,
       });
-      if (res.ok) {
-        setMsg({ type: "ok", text: "Saved" });
-        setName(""); setEmail(""); setPhone("");
-        fetchList();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setMsg({ type: "err", text: err.message || "Error" });
-      }
+      setMsg({ type: "ok", text: "Saved" });
+      setName("");
+      setEmail("");
+      setPhone("");
+      await fetchList(); // obavezno refetch
     } catch (err) {
-      setMsg({ type: "err", text: err.message });
+      setMsg({ type: "err", text: err.message || "Error" });
     }
   }
 
@@ -47,19 +52,66 @@ export default function ProfessorForm() {
       <h2>Professors</h2>
       <form onSubmit={submit}>
         <div className="form-row">
-          <input className="input" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} required />
-          <input className="input" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-          <input className="input small" placeholder="Phone" value={phone} onChange={e => setPhone(e.target.value)} />
+          <input
+            className="input"
+            placeholder="Full name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            className="input"
+            placeholder="Email (optional)"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input
+            className="input small"
+            placeholder="Phone (optional)"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
         </div>
         <button className="btn" type="submit">Save</button>
-        {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
+        <button
+          type="button"
+          className="btn"
+          style={{ marginLeft: 8 }}
+          onClick={fetchList}
+        >
+          Refresh
+        </button>
+        {msg && (
+          <div className={msg.type === "ok" ? "success" : "error"}>
+            {msg.text}
+          </div>
+        )}
       </form>
 
-      <h3>All Professors</h3>
+      <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        All Professors {loading ? <small>(loading...)</small> : null}
+      </h3>
+
       <table className="table">
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th></tr></thead>
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Phone</th></tr>
+        </thead>
         <tbody>
-          {list.map(p => (<tr key={p.id}><td>{p.name}</td><td>{p.email || "-"}</td><td>{p.phone || "-"}</td></tr>))}
+          {list.length === 0 ? (
+            <tr>
+              <td colSpan={3} style={{ opacity: 0.7 }}>
+                (no data)
+              </td>
+            </tr>
+          ) : (
+            list.map((p) => (
+              <tr key={p.id}>
+                <td>{p.name}</td>
+                <td>{p.email || "-"}</td>
+                <td>{p.phone || "-"}</td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>
