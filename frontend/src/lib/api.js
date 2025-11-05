@@ -1,21 +1,36 @@
-const BASE = import.meta.env.VITE_API_BASE?.replace(/\/+$/, "") || "";
+// frontend/src/lib/api.js
+const BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/+$/, "");
 
 export async function apiFetch(path, opts = {}) {
-  const url = `${BASE}/api${path.startsWith("/") ? path : `/${path}`}`;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const url = `${BASE}/api${p}`;
+
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
   });
-  // probaj pročitati JSON; ako je greška, prikaži smislen poruku
+
   if (!res.ok) {
-    let detail = "";
-    try { detail = await res.text(); } catch {}
-    let msg = "Request failed";
+    let msg = `Request failed (${res.status})`;
     try {
-      const parsed = JSON.parse(detail);
-      msg = parsed.message || msg;
-    } catch {}
+      const body = await res.json();
+      if (body?.message) msg = body.message;
+    } catch {
+      // nije JSON, ignore
+    }
     throw new Error(msg);
   }
-  return res.json();
+
+  // 204/no body fallback
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
 }
+
+// Helperi radi kompatibilnosti sa komponentama
+export const apiGet = (path) => apiFetch(path);
+export const apiPost = (path, body) =>
+  apiFetch(path, { method: "POST", body: JSON.stringify(body) });
+export const apiPut = (path, body) =>
+  apiFetch(path, { method: "PUT", body: JSON.stringify(body) });
+export const apiDelete = (path) =>
+  apiFetch(path, { method: "DELETE" });
