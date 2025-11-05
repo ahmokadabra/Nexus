@@ -1,5 +1,6 @@
-﻿import React, { useState, useEffect } from "react";
-import { apiGet, apiPost } from "../lib/api";
+﻿// frontend/src/components/ProgramForm.jsx
+import React, { useEffect, useState } from "react";
+import { apiFetch } from "../lib/api";
 
 export default function ProgramForm() {
   const [name, setName] = useState("");
@@ -8,30 +9,37 @@ export default function ProgramForm() {
   const [selectedProgram, setSelectedProgram] = useState("");
   const [yearNumber, setYearNumber] = useState(1);
   const [msg, setMsg] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => { fetchPrograms(); }, []);
-
-  async function fetchPrograms() {
+  async function load() {
+    setLoading(true);
     try {
-      const data = await apiGet("/api/programs");
+      const data = await apiFetch("/programs");
       setPrograms(data);
     } catch {
       setPrograms([]);
+    } finally {
+      setLoading(false);
     }
   }
+
+  useEffect(() => { load(); }, []);
 
   async function createProgram(e) {
     e.preventDefault();
     setMsg(null);
     try {
-      await apiPost("/api/programs", {
-        name,
-        code: code || undefined
+      await apiFetch("/programs", {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim(),
+          ...(code.trim() ? { code: code.trim() } : {}),
+        }),
       });
       setMsg({ type: "ok", text: "Program created" });
       setName("");
       setCode("");
-      fetchPrograms();
+      load();
     } catch (err) {
       setMsg({ type: "err", text: err.message || "Error" });
     }
@@ -45,12 +53,13 @@ export default function ProgramForm() {
       return;
     }
     try {
-      await apiPost(`/api/programs/${selectedProgram}/years`, {
-        yearNumber: Number(yearNumber)
+      await apiFetch(`/programs/${selectedProgram}/years`, {
+        method: "POST",
+        body: JSON.stringify({ yearNumber: Number(yearNumber) }),
       });
       setMsg({ type: "ok", text: "Year added" });
       setYearNumber(1);
-      fetchPrograms();
+      load();
     } catch (err) {
       setMsg({ type: "err", text: err.message || "Error" });
     }
@@ -59,7 +68,6 @@ export default function ProgramForm() {
   return (
     <div>
       <h2>Programs (Study Programs)</h2>
-
       <form onSubmit={createProgram}>
         <div className="form-row">
           <input
@@ -77,34 +85,18 @@ export default function ProgramForm() {
           />
         </div>
         <button className="btn" type="submit">Create Program</button>
+        <button type="button" className="btn" style={{ marginLeft: 8 }} onClick={load}>
+          Refresh
+        </button>
+        {msg && (
+          <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>
+        )}
       </form>
 
-      <h3>Add year to program</h3>
-      <div className="form-row">
-        <select
-          className="input small"
-          value={selectedProgram}
-          onChange={(e) => setSelectedProgram(e.target.value)}
-        >
-          <option value="">-- select program --</option>
-          {programs.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input small"
-          type="number"
-          min={1}
-          value={yearNumber}
-          onChange={(e) => setYearNumber(e.target.value)}
-        />
-        <button className="btn" onClick={addYear}>Add Year</button>
-      </div>
+      <h3 style={{ display: "inline-block", marginRight: 8 }}>Programs</h3>
+      <small>{loading ? "Loading…" : `${programs.length} item(s)`}</small>
 
-      <h3>Programs</h3>
-      <div>
+      <div style={{ marginTop: 8 }}>
         {programs.map((p) => (
           <div
             key={p.id}
@@ -124,7 +116,27 @@ export default function ProgramForm() {
         ))}
       </div>
 
-      {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
+      <h3 style={{ marginTop: 16 }}>Add year to program</h3>
+      <div className="form-row">
+        <select
+          className="input small"
+          value={selectedProgram}
+          onChange={(e) => setSelectedProgram(e.target.value)}
+        >
+          <option value="">-- select program --</option>
+          {programs.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        <input
+          className="input small"
+          type="number"
+          min={1}
+          value={yearNumber}
+          onChange={(e) => setYearNumber(e.target.value)}
+        />
+        <button className="btn" onClick={addYear}>Add Year</button>
+      </div>
     </div>
   );
 }
