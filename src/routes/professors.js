@@ -1,53 +1,57 @@
 ﻿import { Router } from "express";
+import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "../prisma.js";
 
 export const router = Router();
+const prisma = new PrismaClient();
 
-const profSchema = z.object({
+const bodySchema = z.object({
   name: z.string().min(1),
-  email: z.string().email().optional(),
-  phone: z.string().optional()
+  email: z
+    .string()
+    .email()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => v || undefined),
+  phone: z
+    .string()
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => v || undefined),
 });
 
-router.get("/", async (_req, res) => {
-  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
-  res.json(list);
-});
-
-router.post("/", async (req, res) => {
-  const parsed = profSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+// GET /api/professors
+router.get("/", async (_req, res, next) => {
   try {
-    const created = await prisma.professor.create({ data: parsed.data });
+    const data = await prisma.professor.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/professors
+router.post("/", async (req, res, next) => {
+  try {
+    const data = bodySchema.parse(req.body);
+    const created = await prisma.professor.create({ data });
     res.status(201).json(created);
-  } catch (e) {
-    res.status(409).json({ message: "DB error", detail: e.message });
+  } catch (err) {
+    if (err?.code === "P2002") {
+      return res.status(409).json({ message: "Email već postoji" });
+    }
+    next(err);
   }
 });
 
-router.get("/:id", async (req, res) => {
-  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
-  if (!item) return res.status(404).json({ message: "Not found" });
-  res.json(item);
-});
-
-router.put("/:id", async (req, res) => {
-  const parsed = profSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-  try {
-    const updated = await prisma.professor.update({ where: { id: req.params.id }, data: parsed.data });
-    res.json(updated);
-  } catch (e) {
-    res.status(400).json({ message: "Cannot update", detail: e.message });
-  }
-});
-
-router.delete("/:id", async (req, res) => {
+// DELETE /api/professors/:id (opcionalno)
+router.delete("/:id", async (req, res, next) => {
   try {
     await prisma.professor.delete({ where: { id: req.params.id } });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ message: "Cannot delete", detail: e.message });
+    res.status(204).end();
+  } catch (err) {
+    next(err);
   }
 });
