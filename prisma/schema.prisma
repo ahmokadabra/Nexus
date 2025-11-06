@@ -1,5 +1,8 @@
+// prisma/schema.prisma
+
 generator client {
   provider      = "prisma-client-js"
+  // Važno za Render (Linux): dodaj debian-openssl-3.0.x
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -8,84 +11,151 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────────────────────
+// Enumi
+// ─────────────────────────────────────────────────────────────
+
+enum ProfessorTitle {
+  PRACTITIONER        // stručnjak iz prakse
+  ASSISTANT           // asistent
+  SENIOR_ASSISTANT    // viši asistent
+  DOCENT              // docent
+  ASSOCIATE_PROFESSOR // vanredni profesor
+  FULL_PROFESSOR      // redovni profesor
+  EMERITUS            // profesor emeritus
+}
+
+enum WeekType {
+  ALL
+  A
+  B
+}
+
+// ─────────────────────────────────────────────────────────────
+// Modeli
+// ─────────────────────────────────────────────────────────────
+
 model Professor {
-  id        String   @id @default(cuid())
+  id        String         @id @default(cuid())
   name      String
-  email     String?  @unique
+  email     String?        @unique
   phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  title     ProfessorTitle @default(PRACTITIONER)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
   courses   Course[]
+  entries   ScheduleEntry[]
 }
 
 model Subject {
-  id        String   @id @default(cuid())
-  code      String   @unique
+  id        String    @id @default(cuid())
+  code      String    @unique
   name      String
   ects      Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   courses   Course[]
 }
 
 model Room {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id        String    @id @default(cuid())
+  name      String    @unique
   capacity  Int?
-  isOnline  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isOnline  Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  entries   ScheduleEntry[]
 }
 
 model Cycle {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
   dateStart DateTime
   dateEnd   DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   terms     Term[]
 }
 
 model Term {
-  id        String   @id @default(cuid())
-  cycle     Cycle    @relation(fields: [cycleId], references: [id])
+  id        String    @id @default(cuid())
+  cycle     Cycle     @relation(fields: [cycleId], references: [id])
   cycleId   String
   name      String
   dateStart DateTime?
   dateEnd   DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
   courses   Course[]
+  entries   ScheduleEntry[]
 }
 
 model StudyProgram {
-  id        String       @id @default(cuid())
+  id        String        @id @default(cuid())
   name      String
-  code      String?      @unique
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  code      String?       @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
   years     ProgramYear[]
 }
 
 model ProgramYear {
-  id           String       @id @default(cuid())
-  program      StudyProgram @relation(fields: [programId], references: [id])
+  id           String        @id @default(cuid())
+  program      StudyProgram  @relation(fields: [programId], references: [id])
   programId    String
   yearNumber   Int
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 }
 
 model Course {
-  id          String    @id @default(cuid())
-  subject     Subject   @relation(fields: [subjectId], references: [id])
+  id          String     @id @default(cuid())
+  subject     Subject    @relation(fields: [subjectId], references: [id])
   subjectId   String
-  professor   Professor @relation(fields: [professorId], references: [id])
+  professor   Professor  @relation(fields: [professorId], references: [id])
   professorId String
-  term        Term      @relation(fields: [termId], references: [id])
+  term        Term       @relation(fields: [termId], references: [id])
   termId      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  entries     ScheduleEntry[]
 }
 
+// Kalendar / raspored (koristi ga /api/entries ruter)
+model ScheduleEntry {
+  id          String     @id @default(cuid())
+
+  term        Term       @relation(fields: [termId], references: [id])
+  termId      String
+
+  course      Course     @relation(fields: [courseId], references: [id])
+  courseId    String
+
+  professor   Professor  @relation(fields: [professorId], references: [id])
+  professorId String
+
+  room        Room       @relation(fields: [roomId], references: [id])
+  roomId      String
+
+  groupName   String?
+  dayOfWeek   Int        // 1 (Mon) ... 7 (Sun) ili kako koristiš
+  startMin    Int        // minute od 00:00
+  endMin      Int        // minute od 00:00
+  weekType    WeekType?
+  isOnline    Boolean?
+  note        String?
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([termId, dayOfWeek])
+  @@index([professorId, dayOfWeek])
+  @@index([roomId, dayOfWeek])
+}
