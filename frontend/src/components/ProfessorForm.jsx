@@ -3,211 +3,233 @@ import React, { useEffect, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
 
 const TITLE_OPTIONS = [
-  { value: "", label: "(bez zvanja)" },
-  { value: "PRACTICE_EXPERT", label: "Stručnjak iz prakse" },
-  { value: "ASSISTANT", label: "Asistent" },
-  { value: "SENIOR_ASSISTANT", label: "Viši asistent" },
-  { value: "DOCENT", label: "Docent" },
-  { value: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
-  { value: "FULL_PROFESSOR", label: "Redovni profesor" },
-  { value: "PROFESSOR_EMERITUS", label: "Profesor emeritus" },
+  { v: "", label: "— Zvanje —" },
+  { v: "PRACTITIONER", label: "Stručnjak iz prakse" },
+  { v: "ASSISTANT", label: "Asistent" },
+  { v: "SENIOR_ASSISTANT", label: "Viši asistent" },
+  { v: "DOCENT", label: "Docent" },
+  { v: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
+  { v: "FULL_PROFESSOR", label: "Redovni profesor" },
+  { v: "EMERITUS", label: "Profesor emeritus" },
 ];
 
-function renderTitle(v) {
-  const m = TITLE_OPTIONS.find((o) => o.value === (v || ""));
-  return m ? m.label : "-";
+const ENGAGEMENT_OPTIONS = [
+  { v: "", label: "— Angažman —" },
+  { v: "EMPLOYED", label: "Radni odnos" },
+  { v: "EXTERNAL", label: "Vanjski saradnik" },
+];
+
+function humanTitle(v) {
+  const m = TITLE_OPTIONS.find((o) => o.v === v);
+  return m?.label ?? "-";
+}
+
+function humanEngagement(v) {
+  const m = ENGAGEMENT_OPTIONS.find((o) => o.v === v);
+  return m?.label ?? "-";
 }
 
 export default function ProfessorForm() {
-  const empty = { name: "", email: "", phone: "", title: "" };
-  const [form, setForm] = useState(empty);
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [editingId, setEditingId] = useState(null);
 
-  async function fetchList() {
-    setLoading(true);
-    setMsg(null);
+  const [idEditing, setIdEditing] = useState(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [title, setTitle] = useState("");
+  const [engagement, setEngagement] = useState(""); // ⬅️ novo
+
+  async function load() {
     try {
       const data = await apiGet("/api/professors");
       setList(data);
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
-    } finally {
-      setLoading(false);
+    } catch {
+      setList([]);
     }
   }
 
   useEffect(() => {
-    fetchList();
+    load();
   }, []);
 
-  function onChange(e) {
-    const { name, value } = e.target;
-    setForm((s) => ({ ...s, [name]: value }));
+  function resetForm() {
+    setIdEditing(null);
+    setName("");
+    setEmail("");
+    setPhone("");
+    setTitle("");
+    setEngagement("");
   }
 
   async function submit(e) {
     e.preventDefault();
     setMsg(null);
+
     const payload = {
-      name: form.name,
-      email: form.email || undefined,
-      phone: form.phone || undefined,
-      title: form.title || undefined, // enum vrijednost
+      name,
+      email: email || null,
+      phone: phone || null,
+      title: title || null,
+      engagement: engagement || null, // ⬅️ novo
     };
 
     try {
-      if (editingId) {
-        await apiPut(`/api/professors/${editingId}`, payload);
-        setMsg({ type: "ok", text: "Ažurirano" });
+      if (idEditing) {
+        await apiPut(`/api/professors/${idEditing}`, payload);
+        setMsg({ type: "ok", text: "Updated" });
       } else {
         await apiPost("/api/professors", payload);
-        setMsg({ type: "ok", text: "Sačuvano" });
+        setMsg({ type: "ok", text: "Saved" });
       }
-      setForm(empty);
-      setEditingId(null);
-      await fetchList();
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
+      resetForm();
+      load();
+    } catch (err) {
+      setMsg({
+        type: "err",
+        text: err?.message || "Error",
+      });
     }
   }
 
-  function onEdit(p) {
-    setForm({
-      name: p.name || "",
-      email: p.email || "",
-      phone: p.phone || "",
-      title: p.title || "",
-    });
-    setEditingId(p.id);
-    setMsg(null);
+  function startEdit(p) {
+    setIdEditing(p.id);
+    setName(p.name || "");
+    setEmail(p.email || "");
+    setPhone(p.phone || "");
+    setTitle(p.title || "");
+    setEngagement(p.engagement || "");
   }
 
-  function onCancel() {
-    setForm(empty);
-    setEditingId(null);
-    setMsg(null);
-  }
-
-  async function onDelete(id) {
-    if (!confirm("Obrisati profesora?")) return;
-    setMsg(null);
+  async function remove(id) {
+    if (!confirm("Delete?")) return;
     try {
       await apiDelete(`/api/professors/${id}`);
-      await fetchList();
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
+      load();
+    } catch (err) {
+      setMsg({ type: "err", text: err?.message || "Error" });
     }
   }
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>Professors</h2>
-        <button className="btn" onClick={fetchList} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
-      </div>
+      <h2>Professors</h2>
 
       <form onSubmit={submit}>
-        <div className="form-row">
+        <div className="form-row" style={{ flexWrap: "wrap", gap: 8 }}>
           <input
             className="input"
-            name="name"
-            placeholder="Puno ime"
-            value={form.name}
-            onChange={onChange}
+            placeholder="Full name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             required
           />
           <input
             className="input"
-            name="email"
             placeholder="Email"
-            value={form.email}
-            onChange={onChange}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
           />
           <input
             className="input small"
-            name="phone"
-            placeholder="Telefon"
-            value={form.phone}
-            onChange={onChange}
+            placeholder="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
           />
+
           <select
             className="input small"
-            name="title"
-            value={form.title}
-            onChange={onChange}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
           >
             {TITLE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
+              <option key={o.v} value={o.v}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
+          {/* ⬇️ NOVI dropdown */}
+          <select
+            className="input small"
+            value={engagement}
+            onChange={(e) => setEngagement(e.target.value)}
+          >
+            {ENGAGEMENT_OPTIONS.map((o) => (
+              <option key={o.v} value={o.v}>
                 {o.label}
               </option>
             ))}
           </select>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" type="submit" disabled={loading}>
-            {editingId ? "Update" : "Save"}
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button className="btn" type="submit">
+            {idEditing ? "Update" : "Save"}
           </button>
-          {editingId && (
-            <button type="button" className="btn" onClick={onCancel}>
+          {idEditing && (
+            <button className="btn" type="button" onClick={resetForm}>
               Cancel
             </button>
           )}
+          <button
+            className="btn"
+            type="button"
+            onClick={load}
+            title="Refresh list"
+          >
+            Refresh
+          </button>
         </div>
 
         {msg && (
-          <div className={msg.type === "ok" ? "success" : "error"} style={{ marginTop: 8 }}>
+          <div className={msg.type === "ok" ? "success" : "error"}>
             {msg.text}
           </div>
         )}
       </form>
 
-      <h3>All Professors</h3>
-      {loading && list.length === 0 ? (
-        <div>Loading…</div>
-      ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Ime</th>
-              <th>Zvanje</th>
-              <th>Email</th>
-              <th>Telefon</th>
-              <th style={{ width: 160 }}>Akcije</th>
+      <h3 style={{ marginTop: 16 }}>All Professors</h3>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Phone</th>
+            <th>Title</th>
+            <th>Engagement</th>{/* ⬅️ nova kolona */}
+            <th style={{ width: 140 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((p) => (
+            <tr key={p.id}>
+              <td>{p.name}</td>
+              <td>{p.email || "-"}</td>
+              <td>{p.phone || "-"}</td>
+              <td>{humanTitle(p.title)}</td>
+              <td>{humanEngagement(p.engagement)}</td>
+              <td>
+                <button className="btn" onClick={() => startEdit(p)}>
+                  Edit
+                </button>{" "}
+                <button
+                  className="btn"
+                  onClick={() => remove(p.id)}
+                  style={{ background: "#c62828" }}
+                >
+                  Delete
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {list.map((p) => (
-              <tr key={p.id}>
-                <td>{p.name}</td>
-                <td>{renderTitle(p.title)}</td>
-                <td>{p.email || "-"}</td>
-                <td>{p.phone || "-"}</td>
-                <td style={{ display: "flex", gap: 8 }}>
-                  <button className="btn" onClick={() => onEdit(p)}>
-                    Edit
-                  </button>
-                  <button className="btn" onClick={() => onDelete(p.id)}>
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {list.length === 0 && (
-              <tr>
-                <td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>
-                  Nema podataka
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      )}
+          ))}
+          {list.length === 0 && (
+            <tr>
+              <td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>
+                (No data)
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

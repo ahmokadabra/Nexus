@@ -5,71 +5,65 @@ import { prisma } from "../prisma.js";
 
 export const router = Router();
 
-// Mora tačno odgovarati Prisma enumu ProfessorTitle u schema.prisma
-const TitleEnum = [
-  "PRACTICE_EXPERT",
+const titleEnum = z.enum([
+  "PRACTITIONER",
   "ASSISTANT",
   "SENIOR_ASSISTANT",
   "DOCENT",
   "ASSOCIATE_PROFESSOR",
   "FULL_PROFESSOR",
-  "PROFESSOR_EMERITUS",
-];
+  "EMERITUS",
+]);
 
-// Helper za opcione stringove: "" -> undefined
-const optionalString = z
-  .string()
-  .trim()
-  .optional()
-  .or(z.literal(""))
-  .transform((v) => (v ? v : undefined));
+const engagementEnum = z.enum(["EMPLOYED", "EXTERNAL"]); // ⬅️ novo
 
-const profCreateSchema = z.object({
+const baseSchema = z.object({
   name: z.string().min(1),
-  email: optionalString, // može biti undefined
-  phone: optionalString,
-  title: z.enum(TitleEnum).optional(), // može biti undefined
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  title: titleEnum.optional().nullable(),
+  engagement: engagementEnum.optional().nullable(), // ⬅️ novo
 });
-
-const profUpdateSchema = profCreateSchema.partial();
 
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({
-    orderBy: { name: "asc" },
+    orderBy: [{ createdAt: "desc" }],
   });
   res.json(list);
 });
 
-router.get("/:id", async (req, res) => {
-  const item = await prisma.professor.findUnique({
-    where: { id: req.params.id },
-  });
-  if (!item) return res.status(404).json({ message: "Not found" });
-  res.json(item);
-});
-
 router.post("/", async (req, res) => {
-  const parsed = profCreateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ message: "Validation error", errors: parsed.error.flatten() });
-  }
+  const cleaned = {
+    ...req.body,
+    email: req.body?.email ? String(req.body.email).trim() : null,
+    phone: req.body?.phone ? String(req.body.phone).trim() : null,
+    title: req.body?.title || null,
+    engagement: req.body?.engagement || null,
+  };
+  const parsed = baseSchema.safeParse(cleaned);
+  if (!parsed.success)
+    return res.status(400).json({ errors: parsed.error.flatten() });
+
   try {
     const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
   } catch (e) {
-    res.status(400).json({ message: "DB error", detail: e.message });
+    res.status(409).json({ message: "DB error", detail: e.message });
   }
 });
 
 router.put("/:id", async (req, res) => {
-  const parsed = profUpdateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ message: "Validation error", errors: parsed.error.flatten() });
-  }
+  const cleaned = {
+    ...req.body,
+    email: req.body?.email ? String(req.body.email).trim() : null,
+    phone: req.body?.phone ? String(req.body.phone).trim() : null,
+    title: req.body?.title || null,
+    engagement: req.body?.engagement || null,
+  };
+  const parsed = baseSchema.safeParse(cleaned);
+  if (!parsed.success)
+    return res.status(400).json({ errors: parsed.error.flatten() });
+
   try {
     const updated = await prisma.professor.update({
       where: { id: req.params.id },
