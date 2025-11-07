@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
 
-// dostupne opcije za zvanje i angažman
+// Opcije koje nudimo u drop-downu (bosanski oblici enum vrijednosti)
 const TITLES = [
   "STRUČNJAK_IZ_PRAKSE",
   "ASISTENT",
@@ -16,20 +16,57 @@ const TITLES = [
 
 const ENGAGEMENTS = ["RADNI_ODNOS", "VANJSKI_SARADNIK"];
 
+// Lokalizacija (prikaz) – pokriva i stare engleske vrijednosti iz baze
+const TITLE_LABELS = {
+  // bosanski
+  STRUČNJAK_IZ_PRAKSE: "Stručnjak iz prakse",
+  ASISTENT: "Asistent",
+  "VIŠI_ASISTENT": "Viši asistent",
+  DOCENT: "Docent",
+  VANREDNI_PROFESOR: "Vanredni profesor",
+  REDOVNI_PROFESOR: "Redovni profesor",
+  PROFESOR_EMERITUS: "Profesor emeritus",
+  // legacy engleski
+  PRACTITIONER: "Stručnjak iz prakse",
+  ASSISTANT: "Asistent",
+  SENIOR_ASSISTANT: "Viši asistent",
+  ASSOCIATE_PROFESSOR: "Vanredni profesor",
+  FULL_PROFESSOR: "Redovni profesor",
+  PROFESSOR_EMERITUS: "Profesor emeritus",
+};
+
+const ENGAGEMENT_LABELS = {
+  // bosanski
+  RADNI_ODNOS: "Radni odnos",
+  VANJSKI_SARADNIK: "Vanjski saradnik",
+  // legacy engleski
+  EMPLOYED: "Radni odnos",
+  EXTERNAL: "Vanjski saradnik",
+};
+
+function prettyTitle(t) {
+  if (!t) return "";
+  return TITLE_LABELS[t] ?? t;
+}
+function prettyEngagement(e) {
+  if (!e) return "";
+  return ENGAGEMENT_LABELS[e] ?? e;
+}
+
 export default function ProfessorForm() {
   // forma
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [title, setTitle] = useState(""); // enum vrijednost
-  const [engagement, setEngagement] = useState(""); // enum vrijednost
+  const [title, setTitle] = useState("");
+  const [engagement, setEngagement] = useState("");
 
   // stanje
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // editiranje
+  // edit
   const [editId, setEditId] = useState(null);
 
   useEffect(() => {
@@ -42,7 +79,7 @@ export default function ProfessorForm() {
     try {
       const data = await apiGet("/api/professors");
       setList(Array.isArray(data) ? data : []);
-    } catch (e) {
+    } catch {
       setMsg({ type: "err", text: "Greška pri učitavanju." });
       setList([]);
     } finally {
@@ -81,13 +118,8 @@ export default function ProfessorForm() {
       }
       resetForm();
       refresh();
-    } catch (e) {
-      let text = "DB error";
-      try {
-        const err = e?.message ? JSON.parse(e.message) : null;
-        if (err?.message) text = err.message;
-      } catch {}
-      setMsg({ type: "err", text });
+    } catch {
+      setMsg({ type: "err", text: "DB error" });
     }
   }
 
@@ -108,54 +140,33 @@ export default function ProfessorForm() {
       await apiDelete(`/api/professors/${id}`);
       setMsg({ type: "ok", text: "Obrisano." });
       refresh();
-    } catch (e) {
+    } catch {
       setMsg({ type: "err", text: "Ne može se obrisati." });
     }
   }
 
-  // --- EXPORT U EXCEL ---
+  // Excel export (lokalizovani nazivi)
   function exportExcel() {
-    // ako želiš uvijek najnovije podatke, možeš prvo pozvati refresh() i sačekati,
-    // ali najčešće je dovoljno ono što je već u listi.
     if (!list.length) {
       setMsg({ type: "err", text: "Nema podataka za izvoz." });
       return;
     }
-
-    // mapiramo u čitljive kolone
     const rows = list.map((p, i) => ({
       Rbr: i + 1,
       Ime: p.name || "",
       Email: p.email || "",
       Telefon: p.phone || "",
       Zvanje: prettyTitle(p.title),
-      Angažman: prettyEngagement(p.engagement),
+      "Angažman": prettyEngagement(p.engagement),
       Kreirano: p.createdAt ? new Date(p.createdAt).toLocaleString() : "",
       Ažurirano: p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "",
       ID: p.id,
     }));
-
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, "Profesori");
     const stamp = new Date().toISOString().slice(0, 10);
     XLSX.writeFile(wb, `profesori_${stamp}.xlsx`);
-  }
-
-  function prettyTitle(t) {
-    if (!t) return "";
-    return t
-      .toLowerCase()
-      .replaceAll("_", " ")
-      .replace(/^\p{L}/u, (x) => x.toUpperCase());
-  }
-
-  function prettyEngagement(e) {
-    if (!e) return "";
-    return e
-      .toLowerCase()
-      .replaceAll("_", " ")
-      .replace(/^\p{L}/u, (x) => x.toUpperCase());
   }
 
   return (
@@ -191,8 +202,6 @@ export default function ProfessorForm() {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />
-
-          {/* Zvanje */}
           <select
             className="input small"
             value={title}
@@ -205,8 +214,6 @@ export default function ProfessorForm() {
               </option>
             ))}
           </select>
-
-          {/* Angažman */}
           <select
             className="input small"
             value={engagement}
