@@ -1,18 +1,30 @@
 ﻿// frontend/src/components/ProfessorForm.jsx
 import React, { useEffect, useState } from "react";
-import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
+import { apiGet, apiPost, apiDelete } from "../lib/api";
+
+// Enum iz backenda -> labeli na bosanskom
+const TITLE_OPTIONS = [
+  { value: "", label: "(bez zvanja)" },
+  { value: "PRACTICE_EXPERT", label: "Stručnjak iz prakse" },
+  { value: "ASSISTANT", label: "Asistent" },
+  { value: "SENIOR_ASSISTANT", label: "Viši asistent" },
+  { value: "DOCENT", label: "Docent" },
+  { value: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
+  { value: "FULL_PROFESSOR", label: "Redovni profesor" },
+  { value: "PROFESSOR_EMERITUS", label: "Profesor emeritus" },
+];
+
+function renderTitle(v) {
+  const m = TITLE_OPTIONS.find(o => o.value === v);
+  return m ? m.label : "-";
+}
 
 export default function ProfessorForm() {
-  // forma
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-
-  // stanje
+  const empty = { name: "", email: "", phone: "", title: "" };
+  const [form, setForm] = useState(empty);
   const [list, setList] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [editingId, setEditingId] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   async function fetchList() {
     setLoading(true);
@@ -21,8 +33,7 @@ export default function ProfessorForm() {
       const data = await apiGet("/api/professors");
       setList(data);
     } catch (e) {
-      setMsg({ type: "error", text: e.message || "Failed to load professors." });
-      setList([]);
+      setMsg({ type: "err", text: e.message });
     } finally {
       setLoading(false);
     }
@@ -30,145 +41,85 @@ export default function ProfessorForm() {
 
   useEffect(() => { fetchList(); }, []);
 
-  function resetForm() {
-    setName("");
-    setEmail("");
-    setPhone("");
-    setEditingId(null);
+  function onChange(e) {
+    const { name, value } = e.target;
+    setForm(s => ({ ...s, [name]: value }));
   }
 
-  async function onSubmit(e) {
+  async function submit(e) {
     e.preventDefault();
     setMsg(null);
     try {
-      if (editingId) {
-        await apiPut(`/api/professors/${editingId}`, {
-          name, email: email || undefined, phone: phone || undefined,
-        });
-        setMsg({ type: "ok", text: "Professor updated." });
-      } else {
-        await apiPost("/api/professors", {
-          name, email: email || undefined, phone: phone || undefined,
-        });
-        setMsg({ type: "ok", text: "Professor saved." });
-      }
-      resetForm();
-      fetchList();
+      await apiPost("/api/professors", {
+        name: form.name,
+        email: form.email || undefined,
+        phone: form.phone || undefined,
+        title: form.title || undefined,
+      });
+      setForm(empty);
+      await fetchList();
+      setMsg({ type: "ok", text: "Sačuvano" });
     } catch (e) {
-      // P2002 (unique email) ili generički
-      const payload = e.payload || {};
-      const nice =
-        payload?.message ||
-        (payload?.code === "P2002" ? "Email already exists." : "") ||
-        e.message ||
-        "Error";
-      setMsg({ type: "error", text: nice });
+      setMsg({ type: "err", text: e.message });
     }
   }
 
-  function onEdit(p) {
-    setEditingId(p.id);
-    setName(p.name || "");
-    setEmail(p.email || "");
-    setPhone(p.phone || "");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
   async function onDelete(id) {
-    if (!confirm("Delete this professor?")) return;
+    if (!confirm("Obrisati profesora?")) return;
     setMsg(null);
     try {
       await apiDelete(`/api/professors/${id}`);
-      setMsg({ type: "ok", text: "Deleted." });
-      // optimistički refresh
-      setList((prev) => prev.filter((x) => x.id !== id));
-      if (editingId === id) resetForm();
+      await fetchList();
     } catch (e) {
-      setMsg({ type: "error", text: e.message || "Cannot delete." });
+      setMsg({ type: "err", text: e.message });
     }
   }
 
   return (
     <div>
-      <div className="form-header">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <h2>Professors</h2>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={fetchList} disabled={loading}>
-            {loading ? "Loading..." : "Refresh"}
-          </button>
-          {editingId && (
-            <button className="btn" type="button" onClick={resetForm}>
-              Cancel Edit
-            </button>
-          )}
-        </div>
+        <button className="btn" onClick={fetchList} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
       </div>
 
-      <form onSubmit={onSubmit}>
-        {editingId ? (
-          <div className="hint" style={{ marginBottom: 8 }}>
-            Editing <strong>{editingId}</strong>
-          </div>
-        ) : null}
-
+      <form onSubmit={submit}>
         <div className="form-row">
-          <input
-            className="input"
-            placeholder="Full name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <input
-            className="input"
-            placeholder="Email (optional, unique)"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <input
-            className="input small"
-            placeholder="Phone (optional)"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
+          <input className="input" name="name" placeholder="Puno ime"
+                 value={form.name} onChange={onChange} required />
+          <input className="input" name="email" placeholder="Email"
+                 value={form.email} onChange={onChange} />
+          <input className="input small" name="phone" placeholder="Telefon"
+                 value={form.phone} onChange={onChange} />
+          <select className="input small" name="title" value={form.title} onChange={onChange}>
+            {TITLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
 
-        <button className="btn" type="submit" disabled={loading}>
-          {editingId ? "Update" : "Save"}
-        </button>
-
-        {msg && (
-          <div className={msg.type === "ok" ? "success" : "error"} style={{ marginTop: 8 }}>
-            {msg.text}
-          </div>
-        )}
+        <button className="btn" type="submit" disabled={loading}>Save</button>
+        {msg && <div className={msg.type==="ok"?"success":"error"} style={{marginTop:8}}>{msg.text}</div>}
       </form>
 
-      <h3 style={{ marginTop: 16 }}>All Professors</h3>
-
-      {loading && list.length === 0 ? (
-        <div className="hint">Loading...</div>
-      ) : list.length === 0 ? (
-        <div className="hint">No professors yet.</div>
+      <h3>All Professors</h3>
+      {loading && list.length===0 ? (
+        <div>Loading…</div>
       ) : (
         <table className="table">
           <thead>
-            <tr><th>Name</th><th>Email</th><th>Phone</th><th style={{ width: 140 }}>Actions</th></tr>
+            <tr><th>Ime</th><th>Zvanje</th><th>Email</th><th>Telefon</th><th style={{width:120}}>Akcije</th></tr>
           </thead>
           <tbody>
-            {list.map((p) => (
+            {list.map(p => (
               <tr key={p.id}>
                 <td>{p.name}</td>
+                <td>{renderTitle(p.title)}</td>
                 <td>{p.email || "-"}</td>
                 <td>{p.phone || "-"}</td>
-                <td>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn" type="button" onClick={() => onEdit(p)}>Edit</button>
-                    <button className="btn" type="button" onClick={() => onDelete(p.id)}>Delete</button>
-                  </div>
-                </td>
+                <td><button className="btn" onClick={() => onDelete(p.id)}>Delete</button></td>
               </tr>
             ))}
+            {list.length===0 && <tr><td colSpan={5} style={{textAlign:"center",opacity:.7}}>Nema podataka</td></tr>}
           </tbody>
         </table>
       )}
