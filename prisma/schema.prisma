@@ -1,7 +1,7 @@
 // prisma/schema.prisma
 generator client {
   provider      = "prisma-client-js"
-  // ostavi ovo jer Render koristi Linux
+  // Render koristi Linux, zato binary target uključuje debian
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -11,13 +11,13 @@ datasource db {
 }
 
 enum ProfessorTitle {
-  PRACTITIONER       // Stručnjak iz prakse
-  ASSISTANT          // Asistent
-  SENIOR_ASSISTANT   // Viši asistent
-  DOCENT             // Docent
-  ASSOCIATE_PROFESSOR // Vanredni profesor
-  FULL_PROFESSOR     // Redovni profesor
-  EMERITUS           // Profesor emeritus
+  PRACTITIONER         // Stručnjak iz prakse
+  ASSISTANT            // Asistent
+  SENIOR_ASSISTANT     // Viši asistent
+  ASSISTANT_PROFESSOR  // Docent
+  ASSOCIATE_PROFESSOR  // Vanredni profesor
+  FULL_PROFESSOR       // Redovni profesor
+  PROFESSOR_EMERITUS   // Profesor emeritus
 }
 
 enum Engagement {
@@ -32,14 +32,14 @@ enum WeekType {
 }
 
 model Professor {
-  id        String          @id @default(cuid())
-  name      String
-  email     String?         @unique
-  phone     String?
-  title     ProfessorTitle?
-  engagement Engagement?     // ⬅️ NOVO polje
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  name          String
+  email         String?         @unique
+  phone         String?
+  title         ProfessorTitle?
+  engagement    Engagement?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   courses          Course[]
   scheduleEntries  ScheduleEntry[]
@@ -112,15 +112,15 @@ model ProgramYear {
 }
 
 model Course {
-  id          String    @id @default(cuid())
-  subject     Subject   @relation(fields: [subjectId], references: [id])
-  subjectId   String
-  professor   Professor @relation(fields: [professorId], references: [id])
-  professorId String
-  term        Term      @relation(fields: [termId], references: [id])
-  termId      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  subject       Subject   @relation(fields: [subjectId], references: [id])
+  subjectId     String
+  professor     Professor @relation(fields: [professorId], references: [id])
+  professorId   String
+  term          Term      @relation(fields: [termId], references: [id])
+  termId        String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   scheduleEntries ScheduleEntry[]
 }
