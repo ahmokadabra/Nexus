@@ -57,12 +57,13 @@ model Subject {
 }
 
 model Room {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  capacity  Int?
-  isOnline  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String   @unique
+  shortCode  String?  @unique   // ⬅️ NOVO: skraćenica (npr. AMF)
+  capacity   Int?
+  isOnline   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   scheduleEntries ScheduleEntry[]
 }
