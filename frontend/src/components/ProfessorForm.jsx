@@ -1,32 +1,35 @@
 ﻿// frontend/src/components/ProfessorForm.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
 
+// mape za prikaz
+const PRETTY_TITLE = {
+  PRACTITIONER: "Stručnjak iz prakse",
+  ASSISTANT: "Asistent",
+  SENIOR_ASSISTANT: "Viši asistent",
+  ASSISTANT_PROFESSOR: "Docent",
+  ASSOCIATE_PROFESSOR: "Vanredni profesor",
+  FULL_PROFESSOR: "Redovni profesor",
+  PROFESSOR_EMERITUS: "Profesor emeritus",
+};
+const PRETTY_ENG = { EMPLOYED: "Radni odnos", EXTERNAL: "Vanjski saradnik" };
+
 const TITLE_OPTIONS = [
-  { value: "",                    label: "— Zvanje —" },
-  { value: "PRACTITIONER",        label: "Stručnjak iz prakse" },
-  { value: "ASSISTANT",           label: "Asistent" },
-  { value: "SENIOR_ASSISTANT",    label: "Viši asistent" },
-  { value: "ASSISTANT_PROFESSOR", label: "Docent" },
-  { value: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
-  { value: "FULL_PROFESSOR",      label: "Redovni profesor" },
-  { value: "PROFESSOR_EMERITUS",  label: "Profesor emeritus" },
+  { v: "", label: "— Zvanje —" },
+  { v: "PRACTITIONER", label: "Stručnjak iz prakse" },
+  { v: "ASSISTANT", label: "Asistent" },
+  { v: "SENIOR_ASSISTANT", label: "Viši asistent" },
+  { v: "ASSISTANT_PROFESSOR", label: "Docent" },
+  { v: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
+  { v: "FULL_PROFESSOR", label: "Redovni profesor" },
+  { v: "PROFESSOR_EMERITUS", label: "Profesor emeritus" },
 ];
 
-const ENGAGEMENT_OPTIONS = [
-  { value: "",          label: "— Angažman —" },
-  { value: "EMPLOYED",  label: "Radni odnos" },
-  { value: "EXTERNAL",  label: "Vanjski saradnik" },
+const ENG_OPTIONS = [
+  { v: "", label: "— Angažman —" },
+  { v: "EMPLOYED", label: "Radni odnos" },
+  { v: "EXTERNAL", label: "Vanjski saradnik" },
 ];
-
-const titleLabel = (v) => {
-  const f = TITLE_OPTIONS.find(o => o.value === v);
-  return f?.label ?? "-";
-};
-const engagementLabel = (v) => {
-  const f = ENGAGEMENT_OPTIONS.find(o => o.value === v);
-  return f?.label ?? "-";
-};
 
 export default function ProfessorForm() {
   const [name, setName] = useState("");
@@ -35,29 +38,25 @@ export default function ProfessorForm() {
   const [title, setTitle] = useState("");
   const [engagement, setEngagement] = useState("");
 
-  const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
+  const [list, setList] = useState([]);
+
   const [editingId, setEditingId] = useState(null);
 
-  const csvData = useMemo(() => list.map(p => ({
-    Name: p.name || "",
-    Email: p.email || "",
-    Phone: p.phone || "",
-    Title: titleLabel(p.title),
-    Engagement: engagementLabel(p.engagement),
-  })), [list]);
+  const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
   async function fetchList() {
     try {
       const data = await apiGet("/api/professors");
       setList(Array.isArray(data) ? data : []);
     } catch (e) {
-      setList([]);
       setMsg({ type: "err", text: e.message });
     }
   }
 
-  useEffect(() => { fetchList(); }, []);
+  useEffect(() => {
+    fetchList();
+  }, []);
 
   function resetForm() {
     setName("");
@@ -81,15 +80,15 @@ export default function ProfessorForm() {
     try {
       if (editingId) {
         await apiPut(`/api/professors/${editingId}`, payload);
-        setMsg({ type: "ok", text: "Updated" });
+        setMsg({ type: "ok", text: "Sačuvano" });
       } else {
         await apiPost("/api/professors", payload);
-        setMsg({ type: "ok", text: "Saved" });
+        setMsg({ type: "ok", text: "Sačuvano" });
       }
       resetForm();
       fetchList();
     } catch (e) {
-      setMsg({ type: "err", text: e.message });
+      setMsg({ type: "err", text: e.message || "DB error" });
     }
   }
 
@@ -100,98 +99,93 @@ export default function ProfessorForm() {
     setPhone(p.phone || "");
     setTitle(p.title || "");
     setEngagement(p.engagement || "");
-    setMsg(null);
   }
 
   async function onDelete(id) {
-    if (!confirm("Delete this professor?")) return;
+    if (!confirm("Obrisati profesora?")) return;
     try {
       await apiDelete(`/api/professors/${id}`);
-      setMsg({ type: "ok", text: "Deleted" });
-      if (editingId === id) resetForm();
       fetchList();
     } catch (e) {
       setMsg({ type: "err", text: e.message });
     }
   }
 
-  function downloadCSV() {
-    if (!csvData.length) return;
-    const headers = Object.keys(csvData[0]);
-    const rows = csvData.map(obj =>
-      headers.map(h => {
-        const v = (obj[h] ?? "").toString().replace(/"/g, '""');
-        return `"${v}"`;
-      }).join(",")
-    );
-    const csv = [headers.join(","), ...rows].join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "profesori.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
+  async function downloadExcel() {
+    try {
+      const url = `${API_BASE}/api/professors/export.xlsx`;
+      const res = await fetch(url, { method: "GET" });
+      if (!res.ok) throw new Error("Download nije uspio");
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "profesori.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setMsg({ type: "err", text: e.message });
+    }
   }
 
   return (
     <div>
-      <h2>Professors</h2>
+      <div className="header-row" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+        <h2>Professors</h2>
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn" onClick={fetchList}>Refresh</button>
+          <button className="btn" onClick={downloadExcel}>Preuzmi Excel</button>
+        </div>
+      </div>
 
       <form onSubmit={submit}>
-        <div className="form-row">
-          <input className="input" placeholder="Full name"
-                 value={name} onChange={e=>setName(e.target.value)} required />
-          <input className="input" placeholder="Email"
-                 value={email} onChange={e=>setEmail(e.target.value)} />
-          <input className="input small" placeholder="Phone"
-                 value={phone} onChange={e=>setPhone(e.target.value)} />
-        </div>
-
-        <div className="form-row">
-          <select className="input" value={title} onChange={e=>setTitle(e.target.value)}>
-            {TITLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        <div className="form-row" style={{flexWrap:"wrap", gap:8}}>
+          <input className="input" placeholder="Ime i prezime" value={name} onChange={(e)=>setName(e.target.value)} required />
+          <input className="input" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} />
+          <input className="input small" placeholder="Telefon" value={phone} onChange={(e)=>setPhone(e.target.value)} />
+          <select className="input small" value={title} onChange={(e)=>setTitle(e.target.value)}>
+            {TITLE_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
           </select>
-          <select className="input" value={engagement} onChange={e=>setEngagement(e.target.value)}>
-            {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <select className="input small" value={engagement} onChange={(e)=>setEngagement(e.target.value)}>
+            {ENG_OPTIONS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
           </select>
-        </div>
-
-        <div className="form-row" style={{ gap: 8 }}>
           <button className="btn" type="submit">{editingId ? "Update" : "Save"}</button>
           {editingId && (
             <button type="button" className="btn" onClick={resetForm}>Cancel</button>
           )}
-          <button type="button" className="btn" onClick={downloadCSV}>Download CSV</button>
         </div>
-
-        {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
+        {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
       </form>
 
-      <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
-        <h3 style={{ margin:0 }}>All Professors</h3>
-        <button className="btn" type="button" onClick={fetchList}>Refresh</button>
-      </div>
-
+      <h3>All Professors</h3>
       <table className="table">
         <thead>
           <tr>
-            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th>Actions</th>
+            <th>Ime i prezime</th>
+            <th>Email</th>
+            <th>Telefon</th>
+            <th>Zvanje</th>
+            <th>Angažman</th>
+            <th style={{width:140}}>Akcije</th>
           </tr>
         </thead>
         <tbody>
           {list.length === 0 ? (
             <tr><td colSpan="6">[]</td></tr>
           ) : (
-            list.map(p => (
+            list.map((p) => (
               <tr key={p.id}>
                 <td>{p.name}</td>
                 <td>{p.email || "-"}</td>
                 <td>{p.phone || "-"}</td>
-                <td>{titleLabel(p.title)}</td>
-                <td>{engagementLabel(p.engagement)}</td>
-                <td style={{ display:"flex", gap:8 }}>
-                  <button className="btn" type="button" onClick={() => onEdit(p)}>Edit</button>
-                  <button className="btn" type="button" onClick={() => onDelete(p.id)}>Delete</button>
+                <td>{p.title ? PRETTY_TITLE[p.title] : "-"}</td>
+                <td>{p.engagement ? PRETTY_ENG[p.engagement] : "-"}</td>
+                <td>
+                  <div style={{display:"flex",gap:8}}>
+                    <button className="btn" onClick={()=>onEdit(p)}>Edit</button>
+                    <button className="btn" onClick={()=>onDelete(p.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))

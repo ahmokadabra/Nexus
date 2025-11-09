@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
+import ExcelJS from "exceljs";
 
 export const router = Router();
 
@@ -24,7 +25,25 @@ const TITLE_VALUES = [
 ];
 const ENGAGEMENT_VALUES = ["EMPLOYED", "EXTERNAL"];
 
-/** Zod schema (dozvoljava prazno -> undefined) */
+/** Lokalizacija (za Excel i API kad treba) */
+const prettyTitle = (t) =>
+  ({
+    PRACTITIONER: "Stručnjak iz prakse",
+    ASSISTANT: "Asistent",
+    SENIOR_ASSISTANT: "Viši asistent",
+    ASSISTANT_PROFESSOR: "Docent",
+    ASSOCIATE_PROFESSOR: "Vanredni profesor",
+    FULL_PROFESSOR: "Redovni profesor",
+    PROFESSOR_EMERITUS: "Profesor emeritus"
+  }[t] || "-");
+
+const prettyEngagement = (e) =>
+  ({
+    EMPLOYED: "Radni odnos",
+    EXTERNAL: "Vanjski saradnik"
+  }[e] || "-");
+
+/** Zod schema */
 const professorSchema = z.object({
   name: z.string().transform(cleanStr).refine((s) => !!s, "Name is required"),
   email: z
@@ -39,7 +58,7 @@ const professorSchema = z.object({
   engagement: z.enum(ENGAGEMENT_VALUES).optional(),
 });
 
-/** GET /api/professors?q=&skip=&take=  (q = name/email/phone contains, case-insensitive) */
+/** GET /api/professors?q=&skip=&take= */
 router.get("/", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   const skip = Number.isFinite(Number(req.query.skip)) ? Number(req.query.skip) : 0;
@@ -76,7 +95,6 @@ router.post("/", async (req, res) => {
     res.status(201).json(created);
   } catch (e) {
     if (e && e.code === "P2002") {
-      // unique constraint (najčešće email)
       return res.status(409).json({ message: "Email je već zauzet." });
     }
     return res.status(409).json({ message: "DB error", detail: e.message });
@@ -90,7 +108,7 @@ router.get("/:id", async (req, res) => {
   res.json(item);
 });
 
-/** PUT /api/professors/:id  (partial safe update — prazno -> undefined) */
+/** PUT /api/professors/:id */
 router.put("/:id", async (req, res) => {
   const parsed = professorSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -126,4 +144,55 @@ router.delete("/:id", async (req, res) => {
     }
     return res.status(400).json({ message: "Cannot delete", detail: e.message });
   }
+});
+
+/** GET /api/professors/export.xlsx  -> Excel download */
+router.get("/export.xlsx", async (_req, res) => {
+  const rows = await prisma.professor.findMany({
+    orderBy: { name: "asc" },
+  });
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Nexus";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Profesori");
+
+  ws.columns = [
+    { header: "ID",            key: "id",          width: 25 },
+    { header: "Ime i prezime", key: "name",        width: 30 },
+    { header: "Email",         key: "email",       width: 30 },
+    { header: "Telefon",       key: "phone",       width: 18 },
+    { header: "Zvanje",        key: "title",       width: 24 },
+    { header: "Angažman",      key: "engagement",  width: 20 },
+    { header: "Kreirano",      key: "createdAt",   width: 22 },
+    { header: "Ažurirano",     key: "updatedAt",   width: 22 }
+  ];
+
+  // Header bold
+  ws.getRow(1).font = { bold: true };
+
+  const fmt = (d) => (d ? new Date(d).toLocaleString("bs-BA") : "");
+
+  rows.forEach((p) => {
+    ws.addRow({
+      id: p.id,
+      name: p.name || "",
+      email: p.email || "",
+      phone: p.phone || "",
+      title: p.title ? prettyTitle(p.title) : "-",
+      engagement: p.engagement ? prettyEngagement(p.engagement) : "-",
+      createdAt: fmt(p.createdAt),
+      updatedAt: fmt(p.updatedAt),
+    });
+  });
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", 'attachment; filename="profesori.xlsx"');
+
+  await wb.xlsx.write(res);
+  res.end();
 });
