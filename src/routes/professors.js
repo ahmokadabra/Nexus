@@ -5,136 +5,125 @@ import { prisma } from "../prisma.js";
 
 export const router = Router();
 
-/**
- * Mapiranje BOSANSKI_KOD -> ENGLISH_KOD (kanonske vrijednosti u bazi)
- * Ako ti je baza napravljena sa engleskim enum vrijednostima, ovo će upisivati ispravne.
- * Ako ti je baza ipak na bosanskom, vidi ALTERNATIVU ispod (zamijeni mape).
- */
-const TITLE_BS_TO_EN = {
-  "STRUČNJAK_IZ_PRAKSE": "PRACTITIONER",
-  "ASISTENT": "ASSISTANT",
-  "VIŠI_ASISTENT": "SENIOR_ASSISTANT",
-  "DOCENT": "ASSISTANT_PROFESSOR", // najbliži ekvivalent
-  "VANREDNI_PROFESOR": "ASSOCIATE_PROFESSOR",
-  "REDOVNI_PROFESOR": "FULL_PROFESSOR",
-  "PROFESOR_EMERITUS": "PROFESSOR_EMERITUS",
+/** Helpers */
+const cleanStr = (v) => (typeof v === "string" ? v.trim() : v);
+const undefIfEmpty = (v) => {
+  const s = cleanStr(v);
+  return s === "" || s === undefined ? undefined : s;
 };
 
-const ENGAGEMENT_BS_TO_EN = {
-  "RADNI_ODNOS": "EMPLOYED",
-  "VANJSKI_SARADNIK": "EXTERNAL",
-};
-
-// Dozvoli i legacy engleske vrijednosti da samo “prođu”
-const TITLE_ALLOWED = new Set([
-  ...Object.keys(TITLE_BS_TO_EN),
+/** Enumi iz Prisma sheme */
+const TITLE_VALUES = [
   "PRACTITIONER",
   "ASSISTANT",
   "SENIOR_ASSISTANT",
-  "ASSISTANT_PROFESSOR",
+  "ASSISTANT_PROFESSOR", // Docent
   "ASSOCIATE_PROFESSOR",
   "FULL_PROFESSOR",
   "PROFESSOR_EMERITUS",
-]);
+];
+const ENGAGEMENT_VALUES = ["EMPLOYED", "EXTERNAL"];
 
-const ENGAGEMENT_ALLOWED = new Set([
-  ...Object.keys(ENGAGEMENT_BS_TO_EN),
-  "EMPLOYED",
-  "EXTERNAL",
-]);
-
-function normalizeTitle(val) {
-  if (!val) return undefined;
-  if (TITLE_BS_TO_EN[val]) return TITLE_BS_TO_EN[val]; // bosanski -> engleski
-  if (TITLE_ALLOWED.has(val)) return val; // već je engleski/legacy
-  return undefined; // nepoznato -> ignoriši
-}
-
-function normalizeEngagement(val) {
-  if (!val) return undefined;
-  if (ENGAGEMENT_BS_TO_EN[val]) return ENGAGEMENT_BS_TO_EN[val];
-  if (ENGAGEMENT_ALLOWED.has(val)) return val;
-  return undefined;
-}
-
-const baseSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email().optional().or(z.literal("").transform(() => undefined)),
-  phone: z.string().optional().or(z.literal("").transform(() => undefined)),
-  title: z.string().optional(),       // prihvati bilo šta, pa normalizuj
-  engagement: z.string().optional(),  // prihvati bilo šta, pa normalizuj
+/** Zod schema (dozvoljava prazno -> undefined) */
+const professorSchema = z.object({
+  name: z.string().transform(cleanStr).refine((s) => !!s, "Name is required"),
+  email: z
+    .string()
+    .transform(undefIfEmpty)
+    .optional()
+    .refine((v) => v === undefined || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), {
+      message: "Invalid email",
+    }),
+  phone: z.string().transform(undefIfEmpty).optional(),
+  title: z.enum(TITLE_VALUES).optional(),
+  engagement: z.enum(ENGAGEMENT_VALUES).optional(),
 });
 
-// LIST
-router.get("/", async (_req, res) => {
+/** GET /api/professors?q=&skip=&take=  (q = name/email/phone contains, case-insensitive) */
+router.get("/", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const skip = Number.isFinite(Number(req.query.skip)) ? Number(req.query.skip) : 0;
+  const takeRaw = Number.isFinite(Number(req.query.take)) ? Number(req.query.take) : undefined;
+  const take = takeRaw && takeRaw > 0 && takeRaw <= 200 ? takeRaw : undefined;
+
+  const where = q
+    ? {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
+          { phone: { contains: q, mode: "insensitive" } },
+        ],
+      }
+    : {};
+
   const list = await prisma.professor.findMany({
-    orderBy: { createdAt: "desc" },
+    where,
+    orderBy: { name: "asc" },
+    ...(skip ? { skip } : {}),
+    ...(take ? { take } : {}),
   });
   res.json(list);
 });
 
-// CREATE
+/** POST /api/professors */
 router.post("/", async (req, res) => {
-  const parsed = baseSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-
-  const data = parsed.data;
-
-  const payload = {
-    name: data.name,
-    email: data.email,
-    phone: data.phone,
-    title: normalizeTitle(data.title),
-    engagement: normalizeEngagement(data.engagement),
-  };
-
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
   try {
-    const created = await prisma.professor.create({ data: payload });
+    const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
   } catch (e) {
-    res.status(400).json({ message: "DB error", detail: e.message });
+    if (e && e.code === "P2002") {
+      // unique constraint (najčešće email)
+      return res.status(409).json({ message: "Email je već zauzet." });
+    }
+    return res.status(409).json({ message: "DB error", detail: e.message });
   }
 });
 
-// READ one
+/** GET /api/professors/:id */
 router.get("/:id", async (req, res) => {
   const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
   if (!item) return res.status(404).json({ message: "Not found" });
   res.json(item);
 });
 
-// UPDATE
+/** PUT /api/professors/:id  (partial safe update — prazno -> undefined) */
 router.put("/:id", async (req, res) => {
-  const parsed = baseSchema.partial().extend({ name: z.string().min(1).optional() }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
   const data = parsed.data;
-
-  const payload = {
-    ...(data.name !== undefined ? { name: data.name } : {}),
-    ...(data.email !== undefined ? { email: data.email || undefined } : {}),
-    ...(data.phone !== undefined ? { phone: data.phone || undefined } : {}),
-    ...(data.title !== undefined ? { title: normalizeTitle(data.title) } : {}),
-    ...(data.engagement !== undefined ? { engagement: normalizeEngagement(data.engagement) } : {}),
-  };
 
   try {
     const updated = await prisma.professor.update({
       where: { id: req.params.id },
-      data: payload,
+      data,
     });
     res.json(updated);
   } catch (e) {
-    res.status(400).json({ message: "DB error", detail: e.message });
+    if (e && e.code === "P2002") {
+      return res.status(409).json({ message: "Email je već zauzet." });
+    }
+    if (e && e.code === "P2025") {
+      return res.status(404).json({ message: "Not found" });
+    }
+    return res.status(400).json({ message: "Cannot update", detail: e.message });
   }
 });
 
-// DELETE
+/** DELETE /api/professors/:id */
 router.delete("/:id", async (req, res) => {
   try {
     await prisma.professor.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ message: "Cannot delete", detail: e.message });
+    if (e && e.code === "P2025") {
+      return res.status(404).json({ message: "Not found" });
+    }
+    return res.status(400).json({ message: "Cannot delete", detail: e.message });
   }
 });

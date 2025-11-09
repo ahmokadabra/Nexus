@@ -1,93 +1,63 @@
 ﻿// frontend/src/components/ProfessorForm.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
-import * as XLSX from "xlsx";
 
-// Enum -> label (B/H/S) mapiranja
 const TITLE_OPTIONS = [
-  { value: "",                   label: "— bez zvanja —" },
-  { value: "PRACTITIONER",       label: "Stručnjak iz prakse" },
-  { value: "ASSISTANT",          label: "Asistent" },
-  { value: "SENIOR_ASSISTANT",   label: "Viši asistent" },
-  { value: "ASSISTANT_PROFESSOR",label: "Docent" },
-  { value: "ASSOCIATE_PROFESSOR",label: "Vanredni profesor" },
-  { value: "FULL_PROFESSOR",     label: "Redovni profesor" },
-  { value: "PROFESSOR_EMERITUS", label: "Profesor emeritus" },
+  { value: "",                    label: "— Zvanje —" },
+  { value: "PRACTITIONER",        label: "Stručnjak iz prakse" },
+  { value: "ASSISTANT",           label: "Asistent" },
+  { value: "SENIOR_ASSISTANT",    label: "Viši asistent" },
+  { value: "ASSISTANT_PROFESSOR", label: "Docent" },
+  { value: "ASSOCIATE_PROFESSOR", label: "Vanredni profesor" },
+  { value: "FULL_PROFESSOR",      label: "Redovni profesor" },
+  { value: "PROFESSOR_EMERITUS",  label: "Profesor emeritus" },
 ];
-const TITLE_LABELS = Object.fromEntries(TITLE_OPTIONS.map(o => [o.value, o.label]));
 
 const ENGAGEMENT_OPTIONS = [
-  { value: "",         label: "— bez angažmana —" },
-  { value: "EMPLOYED", label: "Radni odnos" },
-  { value: "EXTERNAL", label: "Vanjski saradnik" }
+  { value: "",          label: "— Angažman —" },
+  { value: "EMPLOYED",  label: "Radni odnos" },
+  { value: "EXTERNAL",  label: "Vanjski saradnik" },
 ];
-const ENGAGEMENT_LABELS = Object.fromEntries(ENGAGEMENT_OPTIONS.map(o => [o.value, o.label]));
+
+const titleLabel = (v) => {
+  const f = TITLE_OPTIONS.find(o => o.value === v);
+  return f?.label ?? "-";
+};
+const engagementLabel = (v) => {
+  const f = ENGAGEMENT_OPTIONS.find(o => o.value === v);
+  return f?.label ?? "-";
+};
 
 export default function ProfessorForm() {
-  const [name, setName]         = useState("");
-  const [email, setEmail]       = useState("");
-  const [phone, setPhone]       = useState("");
-  const [title, setTitle]       = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [title, setTitle] = useState("");
   const [engagement, setEngagement] = useState("");
 
-  const [list, setList]         = useState([]);
-  const [msg, setMsg]           = useState(null);
-
-  // edit state
+  const [list, setList] = useState([]);
+  const [msg, setMsg] = useState(null);
   const [editingId, setEditingId] = useState(null);
 
-  useEffect(() => { fetchList(); }, []);
+  const csvData = useMemo(() => list.map(p => ({
+    Name: p.name || "",
+    Email: p.email || "",
+    Phone: p.phone || "",
+    Title: titleLabel(p.title),
+    Engagement: engagementLabel(p.engagement),
+  })), [list]);
 
   async function fetchList() {
     try {
       const data = await apiGet("/api/professors");
       setList(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (e) {
       setList([]);
+      setMsg({ type: "err", text: e.message });
     }
   }
 
-  function normalizePayload() {
-    return {
-      name,
-      email: email || undefined,
-      phone: phone || undefined,
-      title: title || undefined,               // šaljemo enum vrijednost ili undefined
-      engagement: engagement || undefined,     // enum ili undefined
-    };
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    setMsg(null);
-    const payload = normalizePayload();
-
-    try {
-      if (editingId) {
-        // update
-        const res = await apiPut(`/api/professors/${editingId}`, payload);
-        if (res && res.id) {
-          setMsg({ type: "ok", text: "Ažurirano." });
-          resetForm();
-          fetchList();
-        } else {
-          setMsg({ type: "err", text: res?.message || "Greška pri ažuriranju" });
-        }
-      } else {
-        // create
-        const res = await apiPost("/api/professors", payload);
-        if (res && res.id) {
-          setMsg({ type: "ok", text: "Sačuvano." });
-          resetForm();
-          fetchList();
-        } else {
-          setMsg({ type: "err", text: res?.message || "Greška pri čuvanju" });
-        }
-      }
-    } catch (err) {
-      setMsg({ type: "err", text: err.message || "Greška" });
-    }
-  }
+  useEffect(() => { fetchList(); }, []);
 
   function resetForm() {
     setName("");
@@ -98,7 +68,32 @@ export default function ProfessorForm() {
     setEditingId(null);
   }
 
-  function startEdit(p) {
+  async function submit(e) {
+    e.preventDefault();
+    setMsg(null);
+    const payload = {
+      name: name.trim(),
+      email: email.trim() || undefined,
+      phone: phone.trim() || undefined,
+      title: title || undefined,
+      engagement: engagement || undefined,
+    };
+    try {
+      if (editingId) {
+        await apiPut(`/api/professors/${editingId}`, payload);
+        setMsg({ type: "ok", text: "Updated" });
+      } else {
+        await apiPost("/api/professors", payload);
+        setMsg({ type: "ok", text: "Saved" });
+      }
+      resetForm();
+      fetchList();
+    } catch (e) {
+      setMsg({ type: "err", text: e.message });
+    }
+  }
+
+  function onEdit(p) {
     setEditingId(p.id);
     setName(p.name || "");
     setEmail(p.email || "");
@@ -108,102 +103,98 @@ export default function ProfessorForm() {
     setMsg(null);
   }
 
-  async function remove(id) {
-    if (!confirm("Obrisati profesora?")) return;
-    setMsg(null);
+  async function onDelete(id) {
+    if (!confirm("Delete this professor?")) return;
     try {
       await apiDelete(`/api/professors/${id}`);
-      setMsg({ type: "ok", text: "Obrisano." });
+      setMsg({ type: "ok", text: "Deleted" });
       if (editingId === id) resetForm();
       fetchList();
     } catch (e) {
-      setMsg({ type: "err", text: e.message || "Ne može se obrisati." });
+      setMsg({ type: "err", text: e.message });
     }
   }
 
-  function exportExcel() {
-    // koristimo B/H/S labele pri exportu
-    const rows = (list || []).map(p => ({
-      Ime: p.name || "",
-      Email: p.email || "",
-      Telefon: p.phone || "",
-      Zvanje: p.title ? (TITLE_LABELS[p.title] || p.title) : "",
-      "Angažman": p.engagement ? (ENGAGEMENT_LABELS[p.engagement] || p.engagement) : "",
-      Kreirano: p.createdAt ? new Date(p.createdAt).toLocaleString() : "",
-      Ažurirano: p.updatedAt ? new Date(p.updatedAt).toLocaleString() : "",
-    }));
-    const sheet = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, sheet, "Profesori");
-    XLSX.writeFile(wb, "Profesori.xlsx");
+  function downloadCSV() {
+    if (!csvData.length) return;
+    const headers = Object.keys(csvData[0]);
+    const rows = csvData.map(obj =>
+      headers.map(h => {
+        const v = (obj[h] ?? "").toString().replace(/"/g, '""');
+        return `"${v}"`;
+      }).join(",")
+    );
+    const csv = [headers.join(","), ...rows].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "profesori.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   return (
     <div>
-      <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-        <h2>Professors</h2>
-        <div style={{display: "flex", gap: 8}}>
-          <button className="btn" onClick={fetchList}>Refresh</button>
-          <button className="btn" onClick={exportExcel}>Download Excel</button>
-        </div>
-      </div>
+      <h2>Professors</h2>
 
       <form onSubmit={submit}>
         <div className="form-row">
-          <input className="input" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} required />
-          <input className="input" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-          <input className="input small" placeholder="Phone" value={phone} onChange={e=>setPhone(e.target.value)} />
+          <input className="input" placeholder="Full name"
+                 value={name} onChange={e=>setName(e.target.value)} required />
+          <input className="input" placeholder="Email"
+                 value={email} onChange={e=>setEmail(e.target.value)} />
+          <input className="input small" placeholder="Phone"
+                 value={phone} onChange={e=>setPhone(e.target.value)} />
         </div>
 
         <div className="form-row">
           <select className="input" value={title} onChange={e=>setTitle(e.target.value)}>
-            {TITLE_OPTIONS.map(opt => (
-              <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
-            ))}
+            {TITLE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-
           <select className="input" value={engagement} onChange={e=>setEngagement(e.target.value)}>
-            {ENGAGEMENT_OPTIONS.map(opt => (
-              <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
-            ))}
+            {ENGAGEMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 
-        <div style={{display:"flex", gap:8}}>
+        <div className="form-row" style={{ gap: 8 }}>
           <button className="btn" type="submit">{editingId ? "Update" : "Save"}</button>
           {editingId && (
             <button type="button" className="btn" onClick={resetForm}>Cancel</button>
           )}
+          <button type="button" className="btn" onClick={downloadCSV}>Download CSV</button>
         </div>
 
-        {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
+        {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
       </form>
 
-      <h3>All Professors</h3>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8 }}>
+        <h3 style={{ margin:0 }}>All Professors</h3>
+        <button className="btn" type="button" onClick={fetchList}>Refresh</button>
+      </div>
+
       <table className="table">
         <thead>
           <tr>
-            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th style={{width:150}}>Akcije</th>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {(list || []).map(p => (
-            <tr key={p.id}>
-              <td>{p.name}</td>
-              <td>{p.email || "-"}</td>
-              <td>{p.phone || "-"}</td>
-              <td>{p.title ? (TITLE_LABELS[p.title] || p.title) : "-"}</td>
-              <td>{p.engagement ? (ENGAGEMENT_LABELS[p.engagement] || p.engagement) : "-"}</td>
-              <td>
-                <div style={{display:"flex", gap:8}}>
-                  <button className="btn" onClick={() => startEdit(p)}>Edit</button>
-                  <button className="btn" onClick={() => remove(p.id)}>Delete</button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {(!list || list.length === 0) && (
-            <tr><td colSpan={6} style={{textAlign:"center"}}>Nema zapisa</td></tr>
+          {list.length === 0 ? (
+            <tr><td colSpan="6">[]</td></tr>
+          ) : (
+            list.map(p => (
+              <tr key={p.id}>
+                <td>{p.name}</td>
+                <td>{p.email || "-"}</td>
+                <td>{p.phone || "-"}</td>
+                <td>{titleLabel(p.title)}</td>
+                <td>{engagementLabel(p.engagement)}</td>
+                <td style={{ display:"flex", gap:8 }}>
+                  <button className="btn" type="button" onClick={() => onEdit(p)}>Edit</button>
+                  <button className="btn" type="button" onClick={() => onDelete(p.id)}>Delete</button>
+                </td>
+              </tr>
+            ))
           )}
         </tbody>
       </table>
