@@ -1,0 +1,2 @@
+import logoUrl from "./assets/logo.svg";
+<img src={logoUrl} alt="Nexus" style={{ width: 120, height: "auto" }} />
