@@ -1,5 +1,6 @@
-﻿import React, { useEffect, useState } from "react";
-import { apiGet, apiPost, apiPut, apiDelete, apiUrl } from "../lib/api";
+﻿// frontend/src/components/ProfessorForm.jsx
+import React, { useEffect, useState } from "react";
+import { apiGet, apiPost, apiPut, apiDelete, downloadXlsx } from "../lib/api";
 
 const TITLE_OPTIONS = [
   ["", "— Zvanje —"],
@@ -35,7 +36,6 @@ export default function ProfessorForm() {
   const [engagement, setEngagement] = useState("");
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
-
   const [editId, setEditId] = useState(null);
 
   async function fetchList() {
@@ -48,7 +48,9 @@ export default function ProfessorForm() {
     }
   }
 
-  useEffect(() => { fetchList(); }, []);
+  useEffect(() => {
+    fetchList();
+  }, []);
 
   function resetForm() {
     setName("");
@@ -104,20 +106,10 @@ export default function ProfessorForm() {
     }
   }
 
-  async function downloadXlsx() {
+  async function onDownload() {
     setMsg(null);
     try {
-      const url = apiUrl("/api/professors/export.xlsx");
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "profesori.xlsx";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(a.href);
+      await downloadXlsx("/api/professors/export.xlsx", "profesori.xlsx");
     } catch (e) {
       setMsg({ type: "err", text: `Download nije uspio: ${e.message}` });
     }
@@ -125,57 +117,78 @@ export default function ProfessorForm() {
 
   return (
     <div>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2>Professors</h2>
-        <div style={{display:"flex", gap:8}}>
-          <button className="btn" onClick={fetchList}>Refresh</button>
-          <button className="btn" onClick={downloadXlsx}>Download XLSX</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn" type="button" onClick={fetchList}>Refresh</button>
+          <button className="btn" type="button" onClick={onDownload}>Download XLSX</button>
         </div>
       </div>
 
       <form onSubmit={submit}>
         <div className="form-row">
-          <input className="input" placeholder="Full name"
-                 value={name} onChange={(e)=>setName(e.target.value)} required />
-          <input className="input" placeholder="Email"
-                 value={email} onChange={(e)=>setEmail(e.target.value)} />
-          <input className="input" placeholder="Phone"
-                 value={phone} onChange={(e)=>setPhone(e.target.value)} />
+          <input
+            className="input"
+            placeholder="Full name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            className="input"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input
+            className="input"
+            placeholder="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
         </div>
         <div className="form-row">
-          <select className="input small" value={title} onChange={(e)=>setTitle(e.target.value)}>
+          <select className="input small" value={title} onChange={(e) => setTitle(e.target.value)}>
             {TITLE_OPTIONS.map(([val, label]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
-          <select className="input small" value={engagement} onChange={(e)=>setEngagement(e.target.value)}>
+          <select className="input small" value={engagement} onChange={(e) => setEngagement(e.target.value)}>
             {ENGAGEMENT_OPTIONS.map(([val, label]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
           <button className="btn" type="submit">{editId ? "Update" : "Save"}</button>
-          {editId && <button type="button" className="btn" onClick={resetForm}>Cancel</button>}
+          {editId && (
+            <button type="button" className="btn" onClick={resetForm}>
+              Cancel
+            </button>
+          )}
         </div>
-        {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
+        {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
       </form>
 
       <h3>All Professors</h3>
       <table className="table">
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th></th></tr></thead>
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th></th>
+          </tr>
+        </thead>
         <tbody>
           {list.length === 0 ? (
             <tr><td colSpan="6">[]</td></tr>
           ) : (
-            list.map(p => (
+            list.map((p) => (
               <tr key={p.id}>
                 <td>{p.name}</td>
                 <td>{p.email ?? "-"}</td>
                 <td>{p.phone ?? "-"}</td>
                 <td>{titleLabel(p.title)}</td>
                 <td>{engagementLabel(p.engagement)}</td>
-                <td style={{whiteSpace:"nowrap"}}>
-                  <button className="btn" onClick={()=>onEdit(p)}>Edit</button>{" "}
-                  <button className="btn" onClick={()=>onDelete(p.id)}>Delete</button>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn" type="button" onClick={() => onEdit(p)}>Edit</button>{" "}
+                  <button className="btn" type="button" onClick={() => onDelete(p.id)}>Delete</button>
                 </td>
               </tr>
             ))
