@@ -18,26 +18,29 @@ const sections = [
 export default function DatabasePage() {
   const [section, setSection] = useState("prof");
 
-  const TabBtn = ({ id, label }) => (
-    <button
-      onClick={() => setSection(id)}
-      className="btn"
-      style={{
-        padding: "8px 12px",
-        borderRadius: 8,
-        border: "1px solid #e5e7eb",
-        background: section === id ? "#f1f5f9" : "#fff",
-        cursor: "pointer"
-      }}
-    >
-      {label}
-    </button>
-  );
+  const TabBtn = ({ id, label }) => {
+    const active = section === id;
+    return (
+      <button
+        onClick={() => setSection(id)}
+        className="btn"
+        style={{
+          padding: "8px 12px",
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: active ? "#1f2937" : "#0b1220",
+          color: active ? "var(--text)" : "var(--muted)"
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
 
   const Current = sections.find(s => s.key === section)?.component ?? (() => <div/>);
 
   return (
-    <div>
+    <div className="card">
       {/* Top tabs */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {sections.map(s => <TabBtn key={s.key} id={s.key} label={s.label} />)}

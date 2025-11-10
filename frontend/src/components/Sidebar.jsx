@@ -1,6 +1,6 @@
 import React from "react";
 
-// male inline SVG ikonice (bez dodatnih libova)
+// male inline SVG ikonice
 const IconDB = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
     <ellipse cx="12" cy="5" rx="8" ry="3" stroke="currentColor" strokeWidth="2"/>
@@ -32,42 +32,57 @@ const IconLibrary = () => (
 );
 
 export default function Sidebar({ active, onSelect }) {
-  const btnStyle = (isActive) => ({
-    width: 56, height: 56, borderRadius: 12, display: "grid", placeItems: "center",
-    border: "1px solid #e5e7eb",
-    background: isActive ? "#eef2ff" : "#fff",
-    color: isActive ? "#4338ca" : "#374151",
+  const itemStyle = (isActive) => ({
+    width: 88,
+    borderRadius: 12,
+    display: "grid",
+    placeItems: "center",
+    gap: 6,
+    padding: "10px 8px",
+    border: "1px solid var(--border)",
+    background: isActive ? "#111827" : "transparent",
+    color: isActive ? "var(--accent)" : "var(--text)",
     cursor: "pointer"
   });
 
-  const wrap = { display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: 8, borderRight: "1px solid #eee" };
+  const wrap = {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 10,
+    padding: 10,
+    borderRight: "1px solid var(--border)",
+    background: "#0a1020"
+  };
+
+  const Item = ({ id, label, Icon, isLogo }) => (
+    <button
+      style={itemStyle(active === id)}
+      onClick={() => onSelect(id)}
+      title={label}
+    >
+      {isLogo ? (
+        <img
+          src="/logo.svg"
+          alt="Nexus"
+          style={{ width: 24, height: 24, objectFit: "contain" }}
+          onError={(e)=>{ e.currentTarget.style.display="none"; }}
+        />
+      ) : (<Icon />)}
+      <span style={{ fontSize: 11, color: active === id ? "var(--accent)" : "var(--muted)", textAlign:"center", lineHeight:1.1 }}>
+        {label}
+      </span>
+    </button>
+  );
 
   return (
     <aside style={wrap}>
-      <button title="Početna" style={btnStyle(active === null)} onClick={() => onSelect(null)}>
-        {/* logo smanjeno u sidebaru */}
-        <img src="/logo.svg" alt="Nexus" style={{ width: 22, height: "auto" }} />
-      </button>
-
-      <button title="Baza podataka" style={btnStyle(active === "db")} onClick={() => onSelect("db")}>
-        <IconDB />
-      </button>
-
-      <button title="Plan realizacije" style={btnStyle(active === "plan")} onClick={() => onSelect("plan")}>
-        <IconPlan />
-      </button>
-
-      <button title="Opterećenje nastavnika" style={btnStyle(active === "opterećenje")} onClick={() => onSelect("opterećenje")}>
-        <IconLoad />
-      </button>
-
-      <button title="Raspored nastave" style={btnStyle(active === "raspored")} onClick={() => onSelect("raspored")}>
-        <IconSchedule />
-      </button>
-
-      <button title="Biblioteka" style={btnStyle(active === "biblioteka")} onClick={() => onSelect("biblioteka")}>
-        <IconLibrary />
-      </button>
+      <Item id={null} label="Početna" Icon={IconDB} isLogo />
+      <Item id="db" label="Baza podataka" Icon={IconDB} />
+      <Item id="plan" label="Plan realizacije" Icon={IconPlan} />
+      <Item id="opterećenje" label="Opterećenje nastavnika" Icon={IconLoad} />
+      <Item id="raspored" label="Raspored nastave" Icon={IconSchedule} />
+      <Item id="biblioteka" label="Biblioteka" Icon={IconLibrary} />
     </aside>
   );
 }
