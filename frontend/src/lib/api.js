@@ -1,73 +1,66 @@
 // frontend/src/lib/api.js
 
-// Base URL for the backend API (set in .env.* as VITE_API_BASE)
-// Example: VITE_API_BASE="https://nexus-backend-ijh0.onrender.com"
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+// 1) Odredi bazni URL backend-a na siguran način (prod + dev)
+const FALLBACK_BACKEND =
+  typeof window !== "undefined" && location.hostname.endsWith("onrender.com")
+    ? "https://nexus-backend-ijh0.onrender.com" // 👈 tvoj Render backend URL
+    : "http://localhost:3001";
 
-// Join base + path safely
-export function apiUrl(path) {
-  if (!path) return API_BASE || "/";
-  if (path.startsWith("http")) return path;
-  return `${API_BASE}${path}`;
+export const API_BASE = (
+  import.meta.env?.VITE_API_BASE ||        // prefer .env.production/.env.development
+  (typeof window !== "undefined" && window.__API_BASE__) || // eventualno global
+  FALLBACK_BACKEND
+).replace(/\/+$/, ""); // bez završnog '/'
+
+export function apiUrl(path = "") {
+  const p = String(path || "");
+  return p.startsWith("http") ? p : `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
 }
 
-// Unified response handler: JSON if possible, otherwise text; throws on !ok
-async function handle(res) {
+// Generičan fetch helper
+async function request(method, path, body) {
+  const res = await fetch(apiUrl(path), {
+    method,
+    headers: body
+      ? { "Content-Type": "application/json", Accept: "application/json" }
+      : { Accept: "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  // Ako Render vrati index.html umjesto JSON-a, ovdje bacamo jasan error
+  const ct = res.headers.get("content-type") || "";
+  const isJson = ct.includes("application/json");
+
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      if (j?.message) msg = j.message;
-    } catch (_) {
-      // ignore JSON parse errors; keep default msg
+    if (isJson) {
+      const j = await res.json().catch(() => null);
+      if (j?.message) msg += ` – ${j.message}`;
+    } else {
+      const t = await res.text().catch(() => "");
+      if (t?.startsWith("<!doctype html")) msg += " (dobijen HTML umjesto JSON-a – provjeri VITE_API_BASE)";
     }
     throw new Error(msg);
   }
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return res.json();
-  return res.text();
+  return isJson ? res.json() : res.text();
 }
 
-export async function apiGet(path) {
-  const res = await fetch(apiUrl(path), { method: "GET" });
-  return handle(res);
-}
+export const apiGet = (path) => request("GET", path);
+export const apiPost = (path, body) => request("POST", path, body);
+export const apiPut = (path, body) => request("PUT", path, body);
+export const apiDelete = (path) => request("DELETE", path);
 
-export async function apiPost(path, body) {
-  const res = await fetch(apiUrl(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
+// Za eksplicitne downloade (XLSX, CSV, PDF…)
+export function apiDownload(path, filename = "download.bin") {
+  return fetch(apiUrl(path)).then(async (res) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
   });
-  return handle(res);
-}
-
-export async function apiPut(path, body) {
-  const res = await fetch(apiUrl(path), {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  return handle(res);
-}
-
-export async function apiDelete(path) {
-  const res = await fetch(apiUrl(path), { method: "DELETE" });
-  return handle(res);
-}
-
-// ⬇️ NEW: helper for downloading XLSX files
-export async function downloadXlsx(path, filename = "data.xlsx") {
-  const res = await fetch(apiUrl(path), { method: "GET" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const blob = await res.blob();
-
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // release object URL shortly after click
-  setTimeout(() => URL.revokeObjectURL(a.href), 0);
 }
