@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 
 export const router = Router();
 
+// ===== enums & schema =====
 const titleEnum = z.enum([
   "PRACTITIONER",
   "ASSISTANT",
@@ -26,9 +27,9 @@ const professorSchema = z.object({
   engagement: engagementEnum,
 });
 
-// --- helpers: prikaz na bosanskom/hrv/srp ---
-function titleLabel(t) {
-  switch (t) {
+// ===== helpers for labels =====
+function titleLabel(code) {
+  switch (code) {
     case "PRACTITIONER": return "Stručnjak iz prakse";
     case "ASSISTANT": return "Asistent";
     case "SENIOR_ASSISTANT": return "Viši asistent";
@@ -36,19 +37,19 @@ function titleLabel(t) {
     case "ASSOCIATE_PROFESSOR": return "Vanredni profesor";
     case "FULL_PROFESSOR": return "Redovni profesor";
     case "PROFESSOR_EMERITUS": return "Profesor emeritus";
-    default: return "";
+    default: return "-";
   }
 }
 
-function engagementLabel(e) {
-  switch (e) {
+function engagementLabel(code) {
+  switch (code) {
     case "EMPLOYED": return "Radni odnos";
     case "EXTERNAL": return "Vanjski saradnik";
-    default: return "";
+    default: return "-";
   }
 }
-// --------------------------------------------
 
+// ===== CRUD =====
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
   res.json(list);
@@ -94,45 +95,39 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// >>> XLSX export <<<
+// ===== XLSX export =====
+// URL: /api/professors/export.xlsx
 router.get("/export.xlsx", async (_req, res) => {
-  try {
-    const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
+  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
 
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Profesori");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Professors");
 
-    ws.columns = [
-      { header: "Ime i prezime", key: "name", width: 30 },
-      { header: "Email", key: "email", width: 30 },
-      { header: "Telefon", key: "phone", width: 20 },
-      { header: "Zvanje", key: "title", width: 24 },
-      { header: "Angažman", key: "engagement", width: 20 },
-    ];
+  ws.columns = [
+    { header: "Ime i prezime", key: "name", width: 30 },
+    { header: "Email",         key: "email", width: 30 },
+    { header: "Telefon",       key: "phone", width: 18 },
+    { header: "Zvanje",        key: "title", width: 22 },
+    { header: "Angažman",      key: "eng",   width: 20 },
+  ];
 
-    list.forEach(p => {
-      ws.addRow({
-        name: p.name,
-        email: p.email ?? "",
-        phone: p.phone ?? "",
-        title: titleLabel(p.title),
-        engagement: engagementLabel(p.engagement),
-      });
+  for (const p of list) {
+    ws.addRow({
+      name: p.name,
+      email: p.email || "",
+      phone: p.phone || "",
+      title: titleLabel(p.title),
+      eng: engagementLabel(p.engagement),
     });
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
-    res.setHeader(
-      "Content-Disposition",
-      'attachment; filename="profesori.xlsx"'
-    );
-
-    await wb.xlsx.write(res);
-    res.end();
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ message: "Export failed", detail: e.message });
   }
+
+  // zaglavlja za .xlsx download
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", 'attachment; filename="profesori.xlsx"');
+
+  await wb.xlsx.write(res);
+  res.end();
 });
