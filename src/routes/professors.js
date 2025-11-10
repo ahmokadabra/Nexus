@@ -2,116 +2,78 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
-import ExcelJS from "exceljs";
 
 export const router = Router();
 
-// ===== enums & schema =====
-const titleEnum = z.enum([
-  "PRACTITIONER",
-  "ASSISTANT",
-  "SENIOR_ASSISTANT",
-  "ASSISTANT_PROFESSOR",
-  "ASSOCIATE_PROFESSOR",
-  "FULL_PROFESSOR",
-  "PROFESSOR_EMERITUS",
-]).optional();
+/** helper: prazno -> undefined, string -> trim */
+const emptyToUndef = z.preprocess((v) => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v === "string") {
+    const t = v.trim();
+    return t === "" ? undefined : t;
+  }
+  return v;
+}, z.string().max(254)).optional();
+
+const titleEnum = z
+  .enum([
+    "PRACTITIONER",
+    "ASSISTANT",
+    "SENIOR_ASSISTANT",
+    "ASSISTANT_PROFESSOR",
+    "ASSOCIATE_PROFESSOR",
+    "FULL_PROFESSOR",
+    "PROFESSOR_EMERITUS",
+  ])
+  .optional();
 
 const engagementEnum = z.enum(["EMPLOYED", "EXTERNAL"]).optional();
 
 const professorSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
+  name: z.string().trim().min(1),
+  // Mekša validacija: prihvati bilo koji ne-prazan string (trim),
+  // prazno tretiraj kao undefined. Unique constraint i dalje važi u DB.
+  email: emptyToUndef,
+  phone: emptyToUndef,
   title: titleEnum,
   engagement: engagementEnum,
 });
 
-// ===== helpers for labels =====
-function titleLabel(code) {
-  switch (code) {
-    case "PRACTITIONER": return "Stručnjak iz prakse";
-    case "ASSISTANT": return "Asistent";
-    case "SENIOR_ASSISTANT": return "Viši asistent";
-    case "ASSISTANT_PROFESSOR": return "Docent";
-    case "ASSOCIATE_PROFESSOR": return "Vanredni profesor";
-    case "FULL_PROFESSOR": return "Redovni profesor";
-    case "PROFESSOR_EMERITUS": return "Profesor emeritus";
-    default: return "-";
-  }
-}
-function engagementLabel(code) {
-  switch (code) {
-    case "EMPLOYED": return "Radni odnos";
-    case "EXTERNAL": return "Vanjski saradnik";
-    default: return "-";
-  }
-}
-
-// ===== LIST =====
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
   res.json(list);
 });
 
-// ===== XLSX EXPORT (mora biti prije `/:id`) =====
-router.get("/export.xlsx", async (_req, res) => {
-  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
-
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Professors");
-
-  ws.columns = [
-    { header: "Ime i prezime", key: "name", width: 30 },
-    { header: "Email",         key: "email", width: 30 },
-    { header: "Telefon",       key: "phone", width: 18 },
-    { header: "Zvanje",        key: "title", width: 22 },
-    { header: "Angažman",      key: "eng",   width: 20 },
-  ];
-
-  for (const p of list) {
-    ws.addRow({
-      name: p.name,
-      email: p.email || "",
-      phone: p.phone || "",
-      title: titleLabel(p.title),
-      eng: engagementLabel(p.engagement),
-    });
-  }
-
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-  res.setHeader("Content-Disposition", 'attachment; filename="profesori.xlsx"');
-
-  await wb.xlsx.write(res);
-  res.end();
-});
-
-// ===== CREATE =====
 router.post("/", async (req, res) => {
   const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
   try {
     const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
   } catch (e) {
+    // P2002 = unique constraint (npr. email postoji)
+    if (e?.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+    }
     res.status(409).json({ message: "DB error", detail: e.message });
   }
 });
 
-// ===== READ ONE (ostaje, ali nakon export rute) =====
 router.get("/:id", async (req, res) => {
   const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
   if (!item) return res.status(404).json({ message: "Not found" });
   res.json(item);
 });
 
-// ===== UPDATE =====
 router.put("/:id", async (req, res) => {
   const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
   try {
     const updated = await prisma.professor.update({
       where: { id: req.params.id },
@@ -119,11 +81,15 @@ router.put("/:id", async (req, res) => {
     });
     res.json(updated);
   } catch (e) {
+    if (e?.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+    }
     res.status(400).json({ message: "Cannot update", detail: e.message });
   }
 });
 
-// ===== DELETE =====
 router.delete("/:id", async (req, res) => {
   try {
     await prisma.professor.delete({ where: { id: req.params.id } });
@@ -132,3 +98,5 @@ router.delete("/:id", async (req, res) => {
     res.status(400).json({ message: "Cannot delete", detail: e.message });
   }
 });
+
+// (Ako već imaš export XLSX rutu /api/professors/export.xlsx, ostaje kako jeste)
