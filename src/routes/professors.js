@@ -40,7 +40,6 @@ function titleLabel(code) {
     default: return "-";
   }
 }
-
 function engagementLabel(code) {
   switch (code) {
     case "EMPLOYED": return "Radni odnos";
@@ -49,54 +48,13 @@ function engagementLabel(code) {
   }
 }
 
-// ===== CRUD =====
+// ===== LIST =====
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
   res.json(list);
 });
 
-router.post("/", async (req, res) => {
-  const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-  try {
-    const created = await prisma.professor.create({ data: parsed.data });
-    res.status(201).json(created);
-  } catch (e) {
-    res.status(409).json({ message: "DB error", detail: e.message });
-  }
-});
-
-router.get("/:id", async (req, res) => {
-  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
-  if (!item) return res.status(404).json({ message: "Not found" });
-  res.json(item);
-});
-
-router.put("/:id", async (req, res) => {
-  const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-  try {
-    const updated = await prisma.professor.update({
-      where: { id: req.params.id },
-      data: parsed.data,
-    });
-    res.json(updated);
-  } catch (e) {
-    res.status(400).json({ message: "Cannot update", detail: e.message });
-  }
-});
-
-router.delete("/:id", async (req, res) => {
-  try {
-    await prisma.professor.delete({ where: { id: req.params.id } });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ message: "Cannot delete", detail: e.message });
-  }
-});
-
-// ===== XLSX export =====
-// URL: /api/professors/export.xlsx
+// ===== XLSX EXPORT (mora biti prije `/:id`) =====
 router.get("/export.xlsx", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
 
@@ -121,7 +79,6 @@ router.get("/export.xlsx", async (_req, res) => {
     });
   }
 
-  // zaglavlja za .xlsx download
   res.setHeader(
     "Content-Type",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -130,4 +87,48 @@ router.get("/export.xlsx", async (_req, res) => {
 
   await wb.xlsx.write(res);
   res.end();
+});
+
+// ===== CREATE =====
+router.post("/", async (req, res) => {
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+  try {
+    const created = await prisma.professor.create({ data: parsed.data });
+    res.status(201).json(created);
+  } catch (e) {
+    res.status(409).json({ message: "DB error", detail: e.message });
+  }
+});
+
+// ===== READ ONE (ostaje, ali nakon export rute) =====
+router.get("/:id", async (req, res) => {
+  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
+  if (!item) return res.status(404).json({ message: "Not found" });
+  res.json(item);
+});
+
+// ===== UPDATE =====
+router.put("/:id", async (req, res) => {
+  const parsed = professorSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+  try {
+    const updated = await prisma.professor.update({
+      where: { id: req.params.id },
+      data: parsed.data,
+    });
+    res.json(updated);
+  } catch (e) {
+    res.status(400).json({ message: "Cannot update", detail: e.message });
+  }
+});
+
+// ===== DELETE =====
+router.delete("/:id", async (req, res) => {
+  try {
+    await prisma.professor.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ message: "Cannot delete", detail: e.message });
+  }
 });
