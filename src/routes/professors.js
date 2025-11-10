@@ -8,7 +8,7 @@ export const router = Router();
 
 /* -------------------------- helpers (Zod & labels) ------------------------- */
 
-// Pretvori "" ili null -> undefined, inače trim string
+// Pretvori "" ili null -> undefined; inače trim string (max 254)
 const softString = z.preprocess((v) => {
   if (v === "" || v === null || v === undefined) return undefined;
   if (typeof v === "string") return v.trim();
@@ -33,13 +33,27 @@ const titleValues = [
 
 const engagementValues = ["EMPLOYED", "EXTERNAL"];
 
-const professorSchema = z.object({
+// Create (mora imati name)
+const createSchema = z.object({
   name: z.string().trim().min(1),
-  email: softString,   // dozvoli bilo šta (prazno -> undefined)
-  phone: softString,   // isto
+  email: softString,
+  phone: softString,
   title: optionalEnum(titleValues),
   engagement: optionalEnum(engagementValues),
 });
+
+// Update (sve opcionalno; partial update)
+const updateSchema = z
+  .object({
+    name: z.string().trim().min(1).optional(),
+    email: softString,
+    phone: softString,
+    title: optionalEnum(titleValues),
+    engagement: optionalEnum(engagementValues),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "No fields to update",
+  });
 
 // mapiranja za Excel (bosanski prikaz)
 const TITLE_LABEL = {
@@ -56,69 +70,8 @@ const ENGAGEMENT_LABEL = {
   EXTERNAL: "Vanjski saradnik",
 };
 
-/* ---------------------------------- CRUD ----------------------------------- */
-
-router.get("/", async (_req, res) => {
-  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
-  res.json(list);
-});
-
-router.post("/", async (req, res) => {
-  const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.flatten() });
-  }
-  try {
-    const created = await prisma.professor.create({ data: parsed.data });
-    res.status(201).json(created);
-  } catch (e) {
-    if (e?.code === "P2002") {
-      return res
-        .status(409)
-        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
-    }
-    res.status(409).json({ message: "DB error", detail: e.message });
-  }
-});
-
-router.get("/:id", async (req, res) => {
-  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
-  if (!item) return res.status(404).json({ message: "Not found" });
-  res.json(item);
-});
-
-router.put("/:id", async (req, res) => {
-  const parsed = professorSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.flatten() });
-  }
-  try {
-    const updated = await prisma.professor.update({
-      where: { id: req.params.id },
-      data: parsed.data,
-    });
-    res.json(updated);
-  } catch (e) {
-    if (e?.code === "P2002") {
-      return res
-        .status(409)
-        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
-    }
-    res.status(400).json({ message: "Cannot update", detail: e.message });
-  }
-});
-
-router.delete("/:id", async (req, res) => {
-  try {
-    await prisma.professor.delete({ where: { id: req.params.id } });
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ message: "Cannot delete", detail: e.message });
-  }
-});
-
 /* ------------------------------- EXPORT XLSX ------------------------------- */
-
+/* VAŽNO: ova ruta MORA biti prije "/:id" da ne završi kao dinamički parametar! */
 router.get("/export.xlsx", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
 
@@ -151,4 +104,65 @@ router.get("/export.xlsx", async (_req, res) => {
 
   await wb.xlsx.write(res);
   res.end();
+});
+
+/* ---------------------------------- CRUD ----------------------------------- */
+
+router.get("/", async (_req, res) => {
+  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
+  res.json(list);
+});
+
+router.post("/", async (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
+  try {
+    const created = await prisma.professor.create({ data: parsed.data });
+    res.status(201).json(created);
+  } catch (e) {
+    if (e?.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+    }
+    res.status(409).json({ message: "DB error", detail: e.message });
+  }
+});
+
+router.put("/:id", async (req, res) => {
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
+  try {
+    const updated = await prisma.professor.update({
+      where: { id: req.params.id },
+      data: parsed.data,
+    });
+    res.json(updated);
+  } catch (e) {
+    if (e?.code === "P2002") {
+      return res
+        .status(409)
+        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+    }
+    res.status(400).json({ message: "Cannot update", detail: e.message });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  const item = await prisma.professor.findUnique({ where: { id: req.params.id } });
+  if (!item) return res.status(404).json({ message: "Not found" });
+  res.json(item);
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    await prisma.professor.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ message: "Cannot delete", detail: e.message });
+  }
 });
