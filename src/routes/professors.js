@@ -2,42 +2,61 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
+import ExcelJS from "exceljs";
 
 export const router = Router();
 
-/** helper: prazno -> undefined, string -> trim */
-const emptyToUndef = z.preprocess((v) => {
-  if (v === undefined || v === null) return undefined;
-  if (typeof v === "string") {
-    const t = v.trim();
-    return t === "" ? undefined : t;
-  }
+/* -------------------------- helpers (Zod & labels) ------------------------- */
+
+// Pretvori "" ili null -> undefined, inače trim string
+const softString = z.preprocess((v) => {
+  if (v === "" || v === null || v === undefined) return undefined;
+  if (typeof v === "string") return v.trim();
   return v;
 }, z.string().max(254)).optional();
 
-const titleEnum = z
-  .enum([
-    "PRACTITIONER",
-    "ASSISTANT",
-    "SENIOR_ASSISTANT",
-    "ASSISTANT_PROFESSOR",
-    "ASSOCIATE_PROFESSOR",
-    "FULL_PROFESSOR",
-    "PROFESSOR_EMERITUS",
-  ])
-  .optional();
+// Enum koji prihvata "", null -> undefined
+const optionalEnum = (values) =>
+  z
+    .preprocess((v) => (v === "" || v === null ? undefined : v), z.enum(values))
+    .optional();
 
-const engagementEnum = z.enum(["EMPLOYED", "EXTERNAL"]).optional();
+const titleValues = [
+  "PRACTITIONER",
+  "ASSISTANT",
+  "SENIOR_ASSISTANT",
+  "ASSISTANT_PROFESSOR",
+  "ASSOCIATE_PROFESSOR",
+  "FULL_PROFESSOR",
+  "PROFESSOR_EMERITUS",
+];
+
+const engagementValues = ["EMPLOYED", "EXTERNAL"];
 
 const professorSchema = z.object({
   name: z.string().trim().min(1),
-  // Mekša validacija: prihvati bilo koji ne-prazan string (trim),
-  // prazno tretiraj kao undefined. Unique constraint i dalje važi u DB.
-  email: emptyToUndef,
-  phone: emptyToUndef,
-  title: titleEnum,
-  engagement: engagementEnum,
+  email: softString,   // dozvoli bilo šta (prazno -> undefined)
+  phone: softString,   // isto
+  title: optionalEnum(titleValues),
+  engagement: optionalEnum(engagementValues),
 });
+
+// mapiranja za Excel (bosanski prikaz)
+const TITLE_LABEL = {
+  PRACTITIONER: "Stručnjak iz prakse",
+  ASSISTANT: "Asistent",
+  SENIOR_ASSISTANT: "Viši asistent",
+  ASSISTANT_PROFESSOR: "Docent",
+  ASSOCIATE_PROFESSOR: "Vanredni profesor",
+  FULL_PROFESSOR: "Redovni profesor",
+  PROFESSOR_EMERITUS: "Profesor emeritus",
+};
+const ENGAGEMENT_LABEL = {
+  EMPLOYED: "Radni odnos",
+  EXTERNAL: "Vanjski saradnik",
+};
+
+/* ---------------------------------- CRUD ----------------------------------- */
 
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
@@ -53,7 +72,6 @@ router.post("/", async (req, res) => {
     const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
   } catch (e) {
-    // P2002 = unique constraint (npr. email postoji)
     if (e?.code === "P2002") {
       return res
         .status(409)
@@ -99,4 +117,38 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// (Ako već imaš export XLSX rutu /api/professors/export.xlsx, ostaje kako jeste)
+/* ------------------------------- EXPORT XLSX ------------------------------- */
+
+router.get("/export.xlsx", async (_req, res) => {
+  const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Profesori");
+
+  ws.columns = [
+    { header: "Ime i prezime", key: "name", width: 32 },
+    { header: "Email", key: "email", width: 32 },
+    { header: "Telefon", key: "phone", width: 18 },
+    { header: "Zvanje", key: "title", width: 24 },
+    { header: "Angažman", key: "engagement", width: 20 },
+  ];
+
+  for (const p of list) {
+    ws.addRow({
+      name: p.name ?? "",
+      email: p.email ?? "",
+      phone: p.phone ?? "",
+      title: p.title ? TITLE_LABEL[p.title] ?? p.title : "",
+      engagement: p.engagement ? ENGAGEMENT_LABEL[p.engagement] ?? p.engagement : "",
+    });
+  }
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", 'attachment; filename="profesori.xlsx"');
+
+  await wb.xlsx.write(res);
+  res.end();
+});
