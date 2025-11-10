@@ -5,6 +5,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
 export default function RoomForm() {
   // add form
   const [name, setName] = useState("");
+  const [shortCode, setShortCode] = useState(""); // ⬅️ Skraćenica
   const [capacity, setCapacity] = useState("");
   const [isOnline, setIsOnline] = useState(false);
 
@@ -14,7 +15,7 @@ export default function RoomForm() {
 
   // search / sort / pagination
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState("name"); // name|capacity|isOnline
+  const [sortKey, setSortKey] = useState("name"); // name|shortCode|capacity|isOnline
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -22,6 +23,7 @@ export default function RoomForm() {
   // inline edit
   const [editId, setEditId] = useState(null);
   const [eName, setEName] = useState("");
+  const [eShort, setEShort] = useState("");
   const [eCap, setECap] = useState("");
   const [eOnline, setEOnline] = useState(false);
 
@@ -42,12 +44,13 @@ export default function RoomForm() {
     try {
       const payload = {
         name: name.trim(),
+        ...(shortCode ? { shortCode: shortCode.trim() } : {}),
         ...(capacity ? { capacity: Number(capacity) } : {}),
         isOnline,
       };
       await apiPost("/api/rooms", payload);
       setMsg({ type: "ok", text: "Saved" });
-      setName(""); setCapacity(""); setIsOnline(false);
+      setName(""); setShortCode(""); setCapacity(""); setIsOnline(false);
       fetchList();
     } catch (e2) {
       setMsg({ type: "err", text: e2.message });
@@ -57,6 +60,7 @@ export default function RoomForm() {
   function startEdit(r) {
     setEditId(r.id);
     setEName(r.name || "");
+    setEShort(r.shortCode || "");
     setECap(r.capacity ?? "");
     setEOnline(!!r.isOnline);
   }
@@ -65,6 +69,7 @@ export default function RoomForm() {
     try {
       const payload = {
         name: eName.trim(),
+        ...(eShort !== "" ? { shortCode: eShort.trim() } : { shortCode: null }),
         ...(eCap !== "" ? { capacity: Number(eCap) } : { capacity: null }),
         isOnline: !!eOnline,
       };
@@ -92,6 +97,7 @@ export default function RoomForm() {
     if (!q) return list;
     return list.filter(r =>
       (r.name || "").toLowerCase().includes(q) ||
+      (r.shortCode || "").toLowerCase().includes(q) ||
       String(r.capacity ?? "").toLowerCase().includes(q) ||
       (r.isOnline ? "online" : "offline").includes(q)
     );
@@ -109,7 +115,8 @@ export default function RoomForm() {
         va = a.isOnline ? 1 : 0; vb = b.isOnline ? 1 : 0;
         return (va - vb) * dir;
       } else {
-        va = a.name ?? ""; vb = b.name ?? "";
+        va = (sortKey === "shortCode") ? (a.shortCode ?? "") : (a.name ?? "");
+        vb = (sortKey === "shortCode") ? (b.shortCode ?? "") : (b.name ?? "");
         return String(va).localeCompare(String(vb), undefined, { sensitivity: "base" }) * dir;
       }
     });
@@ -141,7 +148,8 @@ export default function RoomForm() {
       {/* add */}
       <form onSubmit={submit}>
         <div className="form-row">
-          <input className="input" placeholder="Name (A-101)" value={name} onChange={e=>setName(e.target.value)} required />
+          <input className="input" placeholder="Name (Amfiteatar)" value={name} onChange={e=>setName(e.target.value)} required />
+          <input className="input small" placeholder="Skraćenica (AMF)" value={shortCode} onChange={e=>setShortCode(e.target.value)} />
           <input className="input small" placeholder="Capacity" value={capacity} onChange={e=>setCapacity(e.target.value)} inputMode="numeric" />
           <label style={{display:"flex",alignItems:"center",gap:8}}>
             <input type="checkbox" checked={isOnline} onChange={e=>setIsOnline(e.target.checked)} /> Online
@@ -156,6 +164,7 @@ export default function RoomForm() {
         <thead>
           <tr>
             <th onClick={()=>toggleSort("name")} style={{cursor:"pointer"}}>Name</th>
+            <th onClick={()=>toggleSort("shortCode")} style={{cursor:"pointer"}}>Skraćenica</th>
             <th onClick={()=>toggleSort("capacity")} style={{cursor:"pointer"}}>Capacity</th>
             <th onClick={()=>toggleSort("isOnline")} style={{cursor:"pointer"}}>Online</th>
             <th></th>
@@ -163,12 +172,13 @@ export default function RoomForm() {
         </thead>
         <tbody>
           {pageItems.length === 0 ? (
-            <tr><td colSpan="4">[]</td></tr>
+            <tr><td colSpan="5">[]</td></tr>
           ) : pageItems.map(r => (
             <tr key={r.id}>
               {editId === r.id ? (
                 <>
                   <td><input className="input small" value={eName} onChange={e=>setEName(e.target.value)} /></td>
+                  <td><input className="input small" value={eShort} onChange={e=>setEShort(e.target.value)} /></td>
                   <td><input className="input small" value={eCap} onChange={e=>setECap(e.target.value)} inputMode="numeric" /></td>
                   <td>
                     <label style={{display:"flex",alignItems:"center",gap:8}}>
@@ -183,6 +193,7 @@ export default function RoomForm() {
               ) : (
                 <>
                   <td>{r.name}</td>
+                  <td>{r.shortCode ?? "-"}</td>
                   <td>{r.capacity ?? "-"}</td>
                   <td>{r.isOnline ? "Yes" : "No"}</td>
                   <td style={{whiteSpace:"nowrap"}}>

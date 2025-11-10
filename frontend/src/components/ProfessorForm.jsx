@@ -1,6 +1,6 @@
 ﻿// frontend/src/components/ProfessorForm.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
+import { apiGet, apiPost, apiPut, apiDelete, apiUrl } from "../lib/api";
 
 const TITLE_OPTIONS = [
   ["", "— Zvanje —"],
@@ -42,12 +42,12 @@ export default function ProfessorForm() {
 
   // search / sort / pagination
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState("name"); // name | email | phone | title | engagement
-  const [sortDir, setSortDir] = useState("asc");  // asc | desc
+  const [sortKey, setSortKey] = useState("name"); // name|email|phone|title|engagement
+  const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  // inline edit state
+  // inline edit
   const [editId, setEditId] = useState(null);
   const [eName, setEName] = useState("");
   const [eEmail, setEEmail] = useState("");
@@ -100,9 +100,7 @@ export default function ProfessorForm() {
     setETitle(p.title || "");
     setEEng(p.engagement || "");
   }
-  function cancelEdit() {
-    setEditId(null);
-  }
+  function cancelEdit() { setEditId(null); }
   async function saveEdit(id) {
     try {
       const payload = {
@@ -128,6 +126,26 @@ export default function ProfessorForm() {
       fetchList();
     } catch (e) {
       setMsg({ type: "err", text: e.message });
+    }
+  }
+
+  // DOWNLOAD XLSX  ✅
+  async function downloadXlsx() {
+    setMsg(null);
+    try {
+      const url = apiUrl("/api/professors/export.xlsx");
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "profesori.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setMsg({ type: "err", text: `Download nije uspio: ${e.message}` });
     }
   }
 
@@ -178,10 +196,11 @@ export default function ProfessorForm() {
         <div className="form-row" style={{gap:8}}>
           <input className="input" placeholder="Pretraga…" value={query} onChange={e=>{ setQuery(e.target.value); setPage(1); }} />
           <button className="btn" onClick={fetchList}>Refresh</button>
+          <button className="btn" onClick={downloadXlsx}>Download XLSX</button>
         </div>
       </div>
 
-      {/* ADD form (ne mijenjamo) */}
+      {/* ADD form */}
       <form onSubmit={submit}>
         <div className="form-row">
           <input className="input" placeholder="Full name" value={name} onChange={e=>setName(e.target.value)} required />
