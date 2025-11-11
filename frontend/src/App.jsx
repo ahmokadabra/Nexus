@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import Sidebar from "./components/Sidebar";
+import PlanRealizacije from "./components/PlanRealizacije.jsx";
 import DatabasePage from "./pages/DatabasePage";
 
 // Logo se čita iz /public/logo.svg

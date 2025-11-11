@@ -164,3 +164,39 @@ model SubjectProgram {
 
   @@id([subjectId, programId]) // po subjektu i programu jedinstveno, yearNumber se može mijenjati
 }
+/// --- PRN: Plan realizacije nastave ---
+
+model PRNPlan {
+  id         String        @id @default(cuid())
+  program    StudyProgram  @relation(fields: [programId], references: [id])
+  programId  String
+  yearNumber Int
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  rows PRNRow[]
+
+  @@unique([programId, yearNumber]) // jedan plan po programu i godini
+}
+
+model PRNRow {
+  id            String     @id @default(cuid())
+  plan          PRNPlan    @relation(fields: [planId], references: [id])
+  planId        String
+
+  subject       Subject    @relation(fields: [subjectId], references: [id])
+  subjectId     String
+
+  // opcionalno: odgovorni profesor za predmet (jednostavna 1:1 varijanta)
+  professor     Professor? @relation(fields: [professorId], references: [id])
+  professorId   String?
+
+  // ukupna pokrivenost u semestru (brojevi unosiš ti)
+  lectureTotal  Int?       @default(0)
+  exerciseTotal Int?       @default(0)
+
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@unique([planId, subjectId]) // po predmetu jednom unutar plana
+}
