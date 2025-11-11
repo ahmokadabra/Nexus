@@ -6,22 +6,20 @@ import ExcelJS from "exceljs";
 
 export const router = Router();
 
-/* -------------------------- helpers (Zod & labels) ------------------------- */
+/* ------------------------------ helpers ------------------------------ */
 
-// Pretvori "" ili null -> undefined; inače trim string (max 254)
-const softString = z.preprocess((v) => {
-  if (v === "" || v === null || v === undefined) return undefined;
-  if (typeof v === "string") return v.trim();
-  return v;
-}, z.string().max(254)).optional();
+// mapiraj “legacy” vrijednosti na nove
+function normalizeTitle(v) {
+  if (v === "" || v == null) return undefined;
+  const u = String(v).toUpperCase();
+  const alias = {
+    DOCENT: "ASSISTANT_PROFESSOR",      // stara vrijednost -> nova
+    EMERITUS: "PROFESSOR_EMERITUS",     // stara vrijednost -> nova
+  };
+  return alias[u] || u;
+}
 
-// Enum koji prihvata "", null -> undefined
-const optionalEnum = (values) =>
-  z
-    .preprocess((v) => (v === "" || v === null ? undefined : v), z.enum(values))
-    .optional();
-
-const titleValues = [
+const TITLE_VALUES = [
   "PRACTITIONER",
   "ASSISTANT",
   "SENIOR_ASSISTANT",
@@ -31,31 +29,45 @@ const titleValues = [
   "PROFESSOR_EMERITUS",
 ];
 
-const engagementValues = ["EMPLOYED", "EXTERNAL"];
+const ENGAGEMENT_VALUES = ["EMPLOYED", "EXTERNAL"];
 
-// Create (mora imati name)
+const softString = z
+  .preprocess((v) => {
+    if (v === "" || v === null || v === undefined) return undefined;
+    if (typeof v === "string") return v.trim();
+    return v;
+  }, z.string().max(254))
+  .optional();
+
+const titleField = z
+  .preprocess((v) => normalizeTitle(v), z.enum(TITLE_VALUES))
+  .optional();
+
+const engagementField = z
+  .preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(ENGAGEMENT_VALUES))
+  .optional();
+
+// create: zahtijeva name
 const createSchema = z.object({
   name: z.string().trim().min(1),
   email: softString,
   phone: softString,
-  title: optionalEnum(titleValues),
-  engagement: optionalEnum(engagementValues),
+  title: titleField,
+  engagement: engagementField,
 });
 
-// Update (sve opcionalno; partial update)
+// update: partial (sve opcionalno)
 const updateSchema = z
   .object({
     name: z.string().trim().min(1).optional(),
     email: softString,
     phone: softString,
-    title: optionalEnum(titleValues),
-    engagement: optionalEnum(engagementValues),
+    title: titleField,
+    engagement: engagementField,
   })
-  .refine((data) => Object.keys(data).length > 0, {
-    message: "No fields to update",
-  });
+  .refine((data) => Object.keys(data).length > 0, { message: "No fields to update" });
 
-// mapiranja za Excel (bosanski prikaz)
+// labeli za Excel
 const TITLE_LABEL = {
   PRACTITIONER: "Stručnjak iz prakse",
   ASSISTANT: "Asistent",
@@ -64,14 +76,18 @@ const TITLE_LABEL = {
   ASSOCIATE_PROFESSOR: "Vanredni profesor",
   FULL_PROFESSOR: "Redovni profesor",
   PROFESSOR_EMERITUS: "Profesor emeritus",
+  // fallback — ako u bazi još uvijek zatekneš legacy vrijednost:
+  DOCENT: "Docent",
+  EMERITUS: "Profesor emeritus",
 };
+
 const ENGAGEMENT_LABEL = {
   EMPLOYED: "Radni odnos",
   EXTERNAL: "Vanjski saradnik",
 };
 
-/* ------------------------------- EXPORT XLSX ------------------------------- */
-/* VAŽNO: ova ruta MORA biti prije "/:id" da ne završi kao dinamički parametar! */
+/* --------------------------- export .xlsx (TOP) --------------------------- */
+// Mora ići prije "/:id" rute.
 router.get("/export.xlsx", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
 
@@ -91,8 +107,8 @@ router.get("/export.xlsx", async (_req, res) => {
       name: p.name ?? "",
       email: p.email ?? "",
       phone: p.phone ?? "",
-      title: p.title ? TITLE_LABEL[p.title] ?? p.title : "",
-      engagement: p.engagement ? ENGAGEMENT_LABEL[p.engagement] ?? p.engagement : "",
+      title: p.title ? (TITLE_LABEL[p.title] || p.title) : "",
+      engagement: p.engagement ? (ENGAGEMENT_LABEL[p.engagement] || p.engagement) : "",
     });
   }
 
@@ -106,7 +122,7 @@ router.get("/export.xlsx", async (_req, res) => {
   res.end();
 });
 
-/* ---------------------------------- CRUD ----------------------------------- */
+/* --------------------------------- CRUD --------------------------------- */
 
 router.get("/", async (_req, res) => {
   const list = await prisma.professor.findMany({ orderBy: { name: "asc" } });
@@ -115,17 +131,14 @@ router.get("/", async (_req, res) => {
 
 router.post("/", async (req, res) => {
   const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.flatten() });
-  }
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
   try {
     const created = await prisma.professor.create({ data: parsed.data });
     res.status(201).json(created);
   } catch (e) {
     if (e?.code === "P2002") {
-      return res
-        .status(409)
-        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+      return res.status(409).json({ message: "Email već postoji (unique)", detail: e.meta?.target });
     }
     res.status(409).json({ message: "DB error", detail: e.message });
   }
@@ -133,9 +146,8 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   const parsed = updateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ errors: parsed.error.flatten() });
-  }
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
   try {
     const updated = await prisma.professor.update({
       where: { id: req.params.id },
@@ -144,9 +156,7 @@ router.put("/:id", async (req, res) => {
     res.json(updated);
   } catch (e) {
     if (e?.code === "P2002") {
-      return res
-        .status(409)
-        .json({ message: "Email već postoji (unique)", detail: e.meta?.target });
+      return res.status(409).json({ message: "Email već postoji (unique)", detail: e.meta?.target });
     }
     res.status(400).json({ message: "Cannot update", detail: e.message });
   }
