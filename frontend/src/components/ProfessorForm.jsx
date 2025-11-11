@@ -1,5 +1,5 @@
 ﻿// frontend/src/components/ProfessorForm.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { apiGet, apiPost, apiPut, apiDelete, downloadXlsx } from "../lib/api";
 
 const TITLE_OPTIONS = [
@@ -29,7 +29,7 @@ function engagementLabel(code) {
 }
 
 export default function ProfessorForm() {
-  // Create form (samo za dodavanje novih)
+  // Create form (dodavanje novih)
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -39,6 +39,10 @@ export default function ProfessorForm() {
   // Lista i status
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
+
+  // Pretraga i sortiranje
+  const [query, setQuery] = useState("");
+  const [sortDir, setSortDir] = useState("asc"); // 'asc' | 'desc'
 
   // Inline edit stanje
   const [editingId, setEditingId] = useState(null);
@@ -63,6 +67,35 @@ export default function ProfessorForm() {
   useEffect(() => {
     fetchList();
   }, []);
+
+  // Filtrirano + sortirano za prikaz
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? list.filter((p) => {
+          const bag = [
+            p.name || "",
+            p.email || "",
+            p.phone || "",
+            titleLabel(p.title),
+            engagementLabel(p.engagement),
+          ]
+            .join(" ")
+            .toLowerCase();
+          return bag.includes(q);
+        })
+      : list;
+
+    const sorted = [...filtered].sort((a, b) => {
+      const an = (a.name || "").toLocaleLowerCase();
+      const bn = (b.name || "").toLocaleLowerCase();
+      if (an < bn) return sortDir === "asc" ? -1 : 1;
+      if (an > bn) return sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [list, query, sortDir]);
 
   // --- CREATE (gornja forma) ---
   function resetCreateForm() {
@@ -115,7 +148,6 @@ export default function ProfessorForm() {
     if (!editingId) return;
     setMsg(null);
     try {
-      // šalji samo vrijednosti koje imaju smisla (prazan string -> ne šaljemo)
       const payload = {};
       if (draft.name.trim()) payload.name = draft.name.trim();
       if (draft.email.trim()) payload.email = draft.email.trim();
@@ -153,11 +185,23 @@ export default function ProfessorForm() {
     }
   }
 
+  // Sort toggle
+  function toggleSort() {
+    setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+  }
+
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h2>Professors</h2>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            className="input"
+            style={{ minWidth: 240 }}
+            placeholder="Pretraga (ime, email, telefon, zvanje, angažman)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
           <button className="btn" onClick={fetchList}>Refresh</button>
           <button className="btn" onClick={onDownload}>Download XLSX</button>
         </div>
@@ -206,14 +250,40 @@ export default function ProfessorForm() {
       <table className="table">
         <thead>
           <tr>
-            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th></th>
+            <th>
+              <button
+                title={`Sortiraj po imenu (${sortDir === "asc" ? "A–Z" : "Z–A"})`}
+                onClick={toggleSort}
+                style={{
+                  background: "transparent",
+                  color: "inherit",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  font: "inherit",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                Name
+                <span style={{ fontSize: 12, opacity: 0.8 }}>
+                  {sortDir === "asc" ? "▲" : "▼"}
+                </span>
+              </button>
+            </th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Zvanje</th>
+            <th>Angažman</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          {list.length === 0 ? (
+          {visible.length === 0 ? (
             <tr><td colSpan="6">[]</td></tr>
           ) : (
-            list.map((p) => {
+            visible.map((p) => {
               const isEditing = editingId === p.id;
               return (
                 <tr key={p.id}>
