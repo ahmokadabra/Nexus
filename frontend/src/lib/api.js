@@ -1,66 +1,68 @@
 // frontend/src/lib/api.js
 
-// 1) Odredi bazni URL backend-a na siguran način (prod + dev)
-const FALLBACK_BACKEND =
-  typeof window !== "undefined" && location.hostname.endsWith("onrender.com")
-    ? "https://nexus-backend-ijh0.onrender.com" // 👈 tvoj Render backend URL
-    : "http://localhost:3001";
+// Bira backend bazu:
+// - prvo iz Vite env-a (VITE_API_BASE)
+// - onda iz window.__API_BASE__ ako postoji
+// - fallback: isti origin (npr. "/api/...").
+const RAW_BASE =
+  (import.meta?.env?.VITE_API_BASE ?? window.__API_BASE__ ?? "").trim();
 
-export const API_BASE = (
-  import.meta.env?.VITE_API_BASE ||        // prefer .env.production/.env.development
-  (typeof window !== "undefined" && window.__API_BASE__) || // eventualno global
-  FALLBACK_BACKEND
-).replace(/\/+$/, ""); // bez završnog '/'
+const apiBase = RAW_BASE ? RAW_BASE.replace(/\/+$/, "") : "";
 
-export function apiUrl(path = "") {
-  const p = String(path || "");
-  return p.startsWith("http") ? p : `${API_BASE}${p.startsWith("/") ? "" : "/"}${p}`;
+// Sastavi pun URL za API rutu
+export function apiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return apiBase ? `${apiBase}${p}` : p;
 }
 
-// Generičan fetch helper
-async function request(method, path, body) {
-  const res = await fetch(apiUrl(path), {
-    method,
-    headers: body
-      ? { "Content-Type": "application/json", Accept: "application/json" }
-      : { Accept: "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+// Generički fetch sa JSON-om i greškama
+export async function apiFetch(path, options = {}) {
+  const url = apiUrl(path);
+  const isJsonBody =
+    options.body && typeof options.body === "object" && !(options.body instanceof FormData);
 
-  // Ako Render vrati index.html umjesto JSON-a, ovdje bacamo jasan error
-  const ct = res.headers.get("content-type") || "";
-  const isJson = ct.includes("application/json");
+  const res = await fetch(url, {
+    method: options.method || "GET",
+    headers: {
+      ...(isJsonBody ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+    body: isJsonBody ? JSON.stringify(options.body) : options.body,
+  });
 
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    if (isJson) {
-      const j = await res.json().catch(() => null);
-      if (j?.message) msg += ` – ${j.message}`;
-    } else {
-      const t = await res.text().catch(() => "");
-      if (t?.startsWith("<!doctype html")) msg += " (dobijen HTML umjesto JSON-a – provjeri VITE_API_BASE)";
-    }
+    let payload = null;
+    try {
+      payload = await res.json();
+    } catch (_) {}
+    const msg = payload?.message || `HTTP ${res.status}`;
     throw new Error(msg);
   }
-  return isJson ? res.json() : res.text();
+
+  if (res.status === 204) return null;
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) return res.json();
+  return res.text();
 }
 
-export const apiGet = (path) => request("GET", path);
-export const apiPost = (path, body) => request("POST", path, body);
-export const apiPut = (path, body) => request("PUT", path, body);
-export const apiDelete = (path) => request("DELETE", path);
+export const apiGet = (p) => apiFetch(p, { method: "GET" });
+export const apiPost = (p, body) => apiFetch(p, { method: "POST", body });
+export const apiPut = (p, body) => apiFetch(p, { method: "PUT", body });
+export const apiDelete = (p) => apiFetch(p, { method: "DELETE" });
 
-// Za eksplicitne downloade (XLSX, CSV, PDF…)
-export function apiDownload(path, filename = "download.bin") {
-  return fetch(apiUrl(path)).then(async (res) => {
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
-  });
+// ✅ XLSX downloader (OVO je falilo u tvom build-u)
+export async function downloadXlsx(path, filename = "data.xlsx") {
+  const url = apiUrl(path);
+  const res = await fetch(url, { method: "GET" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
 }
