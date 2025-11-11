@@ -29,15 +29,26 @@ function engagementLabel(code) {
 }
 
 export default function ProfessorForm() {
+  // Create form (samo za dodavanje novih)
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [title, setTitle] = useState("");
   const [engagement, setEngagement] = useState("");
+
+  // Lista i status
   const [list, setList] = useState([]);
   const [msg, setMsg] = useState(null);
 
-  const [editId, setEditId] = useState(null);
+  // Inline edit stanje
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    title: "",
+    engagement: "",
+  });
 
   async function fetchList() {
     try {
@@ -49,52 +60,79 @@ export default function ProfessorForm() {
     }
   }
 
-  useEffect(() => { fetchList(); }, []);
+  useEffect(() => {
+    fetchList();
+  }, []);
 
-  function resetForm() {
+  // --- CREATE (gornja forma) ---
+  function resetCreateForm() {
     setName("");
     setEmail("");
     setPhone("");
     setTitle("");
     setEngagement("");
-    setEditId(null);
   }
 
-  async function submit(e) {
+  async function submitCreate(e) {
     e.preventDefault();
     setMsg(null);
     try {
       const payload = {
         name: name.trim(),
-        ...(email ? { email: email.trim() } : {}),
-        ...(phone ? { phone: phone.trim() } : {}),
+        ...(email.trim() ? { email: email.trim() } : {}),
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
         ...(title ? { title } : {}),
         ...(engagement ? { engagement } : {}),
       };
-
-      if (editId) {
-        await apiPut(`/api/professors/${editId}`, payload);
-        setMsg({ type: "ok", text: "Updated" });
-      } else {
-        await apiPost("/api/professors", payload);
-        setMsg({ type: "ok", text: "Saved" });
-      }
-      resetForm();
+      await apiPost("/api/professors", payload);
+      setMsg({ type: "ok", text: "Saved" });
+      resetCreateForm();
       fetchList();
     } catch (e) {
       setMsg({ type: "err", text: e.message });
     }
   }
 
-  function onEdit(p) {
-    setEditId(p.id);
-    setName(p.name || "");
-    setEmail(p.email || "");
-    setPhone(p.phone || "");
-    setTitle(p.title || "");
-    setEngagement(p.engagement || "");
+  // --- INLINE EDIT (u tabeli) ---
+  function startInlineEdit(row) {
+    setEditingId(row.id);
+    setDraft({
+      name: row.name || "",
+      email: row.email || "",
+      phone: row.phone || "",
+      title: row.title || "",
+      engagement: row.engagement || "",
+    });
+  }
+  function cancelInlineEdit() {
+    setEditingId(null);
+    setDraft({ name: "", email: "", phone: "", title: "", engagement: "" });
+  }
+  function changeDraft(field, value) {
+    setDraft((d) => ({ ...d, [field]: value }));
+  }
+  async function saveInlineEdit() {
+    if (!editingId) return;
+    setMsg(null);
+    try {
+      // šalji samo vrijednosti koje imaju smisla (prazan string -> ne šaljemo)
+      const payload = {};
+      if (draft.name.trim()) payload.name = draft.name.trim();
+      if (draft.email.trim()) payload.email = draft.email.trim();
+      if (draft.phone.trim()) payload.phone = draft.phone.trim();
+      if (draft.title) payload.title = draft.title;
+      if (draft.engagement) payload.engagement = draft.engagement;
+
+      await apiPut(`/api/professors/${editingId}`, payload);
+      setMsg({ type: "ok", text: "Updated" });
+      cancelInlineEdit();
+      fetchList();
+    } catch (e) {
+      setMsg({ type: "err", text: e.message });
+    }
   }
 
+  // DELETE
   async function onDelete(id) {
     if (!confirm("Delete?")) return;
     try {
@@ -105,10 +143,10 @@ export default function ProfessorForm() {
     }
   }
 
-  async function handleDownload() {
+  // DOWNLOAD XLSX
+  async function onDownload() {
     setMsg(null);
     try {
-      // Backend ruta je tačno: /api/professors/export.xlsx
       await downloadXlsx("/api/professors/export.xlsx", "profesori.xlsx");
     } catch (e) {
       setMsg({ type: "err", text: `Download nije uspio: ${e.message}` });
@@ -117,103 +155,148 @@ export default function ProfessorForm() {
 
   return (
     <div>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2>Professors</h2>
-        <div style={{display:"flex", gap:8}}>
+        <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={fetchList}>Refresh</button>
-          <button className="btn" onClick={handleDownload}>Download XLSX</button>
+          <button className="btn" onClick={onDownload}>Download XLSX</button>
         </div>
       </div>
 
-      <form onSubmit={submit}>
+      {/* GORNJA FORMA: samo dodavanje novih */}
+      <form onSubmit={submitCreate}>
         <div className="form-row">
           <input
             className="input"
             placeholder="Full name"
             value={name}
-            onChange={(e)=>setName(e.target.value)}
+            onChange={(e) => setName(e.target.value)}
             required
           />
           <input
             className="input"
             placeholder="Email"
             value={email}
-            onChange={(e)=>setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
           />
           <input
             className="input"
             placeholder="Phone"
             value={phone}
-            onChange={(e)=>setPhone(e.target.value)}
+            onChange={(e) => setPhone(e.target.value)}
           />
         </div>
         <div className="form-row">
-          <select
-            className="input small"
-            value={title}
-            onChange={(e)=>setTitle(e.target.value)}
-          >
+          <select className="input small" value={title} onChange={(e) => setTitle(e.target.value)}>
             {TITLE_OPTIONS.map(([val, label]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
-
-          <select
-            className="input small"
-            value={engagement}
-            onChange={(e)=>setEngagement(e.target.value)}
-          >
+          <select className="input small" value={engagement} onChange={(e) => setEngagement(e.target.value)}>
             {ENGAGEMENT_OPTIONS.map(([val, label]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>
-
-          <button className="btn" type="submit">
-            {editId ? "Update" : "Save"}
-          </button>
-          {editId && (
-            <button type="button" className="btn" onClick={resetForm}>
-              Cancel
-            </button>
-          )}
+          <button className="btn" type="submit">Save</button>
         </div>
-
-        {msg && (
-          <div className={msg.type === "ok" ? "success" : "error"}>
-            {msg.text}
-          </div>
-        )}
+        {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
       </form>
 
       <h3>All Professors</h3>
       <table className="table">
         <thead>
           <tr>
-            <th>Ime i prezime</th>
-            <th>Email</th>
-            <th>Telefon</th>
-            <th>Zvanje</th>
-            <th>Angažman</th>
-            <th></th>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Zvanje</th><th>Angažman</th><th></th>
           </tr>
         </thead>
         <tbody>
           {list.length === 0 ? (
             <tr><td colSpan="6">[]</td></tr>
           ) : (
-            list.map((p) => (
-              <tr key={p.id}>
-                <td>{p.name}</td>
-                <td>{p.email ?? "-"}</td>
-                <td>{p.phone ?? "-"}</td>
-                <td>{titleLabel(p.title)}</td>
-                <td>{engagementLabel(p.engagement)}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn" onClick={() => onEdit(p)}>Edit</button>{" "}
-                  <button className="btn" onClick={() => onDelete(p.id)}>Delete</button>
-                </td>
-              </tr>
-            ))
+            list.map((p) => {
+              const isEditing = editingId === p.id;
+              return (
+                <tr key={p.id}>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        className="input"
+                        value={draft.name}
+                        onChange={(e) => changeDraft("name", e.target.value)}
+                      />
+                    ) : (
+                      p.name
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        className="input"
+                        value={draft.email}
+                        onChange={(e) => changeDraft("email", e.target.value)}
+                        placeholder="email@domain.tld"
+                      />
+                    ) : (
+                      p.email ?? "-"
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        className="input"
+                        value={draft.phone}
+                        onChange={(e) => changeDraft("phone", e.target.value)}
+                      />
+                    ) : (
+                      p.phone ?? "-"
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <select
+                        className="input small"
+                        value={draft.title}
+                        onChange={(e) => changeDraft("title", e.target.value)}
+                      >
+                        {TITLE_OPTIONS.map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      titleLabel(p.title)
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <select
+                        className="input small"
+                        value={draft.engagement}
+                        onChange={(e) => changeDraft("engagement", e.target.value)}
+                      >
+                        {ENGAGEMENT_OPTIONS.map(([val, label]) => (
+                          <option key={val} value={val}>{label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      engagementLabel(p.engagement)
+                    )}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {isEditing ? (
+                      <>
+                        <button className="btn" onClick={saveInlineEdit}>Save</button>{" "}
+                        <button className="btn" onClick={cancelInlineEdit}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn" onClick={() => startInlineEdit(p)}>Edit</button>{" "}
+                        <button className="btn" onClick={() => onDelete(p.id)}>Delete</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
