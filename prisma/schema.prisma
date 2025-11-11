@@ -1,7 +1,6 @@
 // prisma/schema.prisma
 generator client {
   provider      = "prisma-client-js"
-  // Render koristi Linux, zato binary target uključuje debian
   binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -11,18 +10,18 @@ datasource db {
 }
 
 enum ProfessorTitle {
-  PRACTITIONER         // Stručnjak iz prakse
-  ASSISTANT            // Asistent
-  SENIOR_ASSISTANT     // Viši asistent
-  ASSISTANT_PROFESSOR  // Docent
-  ASSOCIATE_PROFESSOR  // Vanredni profesor
-  FULL_PROFESSOR       // Redovni profesor
-  PROFESSOR_EMERITUS   // Profesor emeritus
+  PRACTITIONER
+  ASSISTANT
+  SENIOR_ASSISTANT
+  ASSISTANT_PROFESSOR
+  ASSOCIATE_PROFESSOR
+  FULL_PROFESSOR
+  PROFESSOR_EMERITUS
 }
 
 enum Engagement {
-  EMPLOYED // Radni odnos
-  EXTERNAL // Vanjski saradnik
+  EMPLOYED
+  EXTERNAL
 }
 
 enum WeekType {
@@ -47,22 +46,20 @@ model Professor {
 
 model Subject {
   id        String   @id @default(cuid())
-  code      String   @unique
+  code      String?  @unique          // <-- više nije obavezno
   name      String
   ects      Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  courses   Course[]
-
-  // NOVO: veza na ProgramYear preko spojne tabele
-  onProgramYears SubjectOnProgramYear[]
+  courses          Course[]
+  subjectPrograms  SubjectProgram[]   // <-- join prema StudyProgram
 }
 
 model Room {
   id         String   @id @default(cuid())
   name       String   @unique
-  shortCode  String?  @unique   // skraćenica (npr. AMF)
+  shortCode  String?  @unique
   capacity   Int?
   isOnline   Boolean  @default(false)
   createdAt  DateTime @default(now())
@@ -103,7 +100,8 @@ model StudyProgram {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  years     ProgramYear[]
+  years            ProgramYear[]
+  subjectPrograms  SubjectProgram[]   // <-- join prema Subject
 }
 
 model ProgramYear {
@@ -113,9 +111,6 @@ model ProgramYear {
   yearNumber   Int
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-
-  // NOVO: veza na Subject preko spojne tabele
-  subjects SubjectOnProgramYear[]
 }
 
 model Course {
@@ -155,13 +150,17 @@ model ScheduleEntry {
   updatedAt   DateTime   @updatedAt
 }
 
-// NOVO: spojna tabela Subject <-> ProgramYear
-model SubjectOnProgramYear {
-  id            String       @id @default(cuid())
-  subject       Subject      @relation(fields: [subjectId], references: [id])
-  subjectId     String
-  programYear   ProgramYear  @relation(fields: [programYearId], references: [id])
-  programYearId String
+// NEW: Join tabela Subject <-> StudyProgram, sa yearNumber
+model SubjectProgram {
+  subjectId  String
+  programId  String
+  yearNumber Int
 
-  @@unique([subjectId, programYearId], name: "subject_program_year_unique")
+  subject    Subject      @relation(fields: [subjectId], references: [id])
+  program    StudyProgram @relation(fields: [programId], references: [id])
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@id([subjectId, programId]) // po subjektu i programu jedinstveno, yearNumber se može mijenjati
 }

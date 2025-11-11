@@ -2,175 +2,139 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
-import ExcelJS from "exceljs";
 
 export const router = Router();
 
-const subjectSchema = z.object({
-  code: z.string().min(1),
-  name: z.string().min(1),
-  ects: z.number().int().nullable().optional(),
-  // lista programYearId-ova na kojima se predmet sluša
-  programYearIds: z.array(z.string().min(1)).optional(),
+// Zod sheme
+const programRefSchema = z.object({
+  programId: z.string().min(1),
+  yearNumber: z.number().int().min(1).max(10),
 });
 
-// GET /api/subjects
+const createSchema = z.object({
+  name: z.string().min(1),
+  code: z.string().trim().min(1).optional(),
+  ects: z.number().int().optional(),
+  programs: z.array(programRefSchema).min(1, "Odaberi bar jedan program"),
+});
+
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  code: z.string().trim().min(1).optional().nullable(),
+  ects: z.number().int().optional().nullable(),
+  programs: z.array(programRefSchema).min(1).optional(),
+});
+
+// LIST
 router.get("/", async (_req, res) => {
   const list = await prisma.subject.findMany({
     orderBy: [{ code: "asc" }, { name: "asc" }],
     include: {
-      onProgramYears: {
-        include: {
-          programYear: { include: { program: true } },
-        },
+      subjectPrograms: {
+        include: { program: true },
       },
     },
   });
   res.json(list);
 });
 
-// POST /api/subjects
+// CREATE
 router.post("/", async (req, res) => {
-  const parsed = subjectSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
+  const { name, code, ects, programs } = parsed.data;
 
-  const { programYearIds = [], ...fields } = parsed.data;
   try {
-    const created = await prisma.subject.create({
-      data: {
-        code: fields.code,
-        name: fields.name,
-        ects: fields.ects ?? null,
-        onProgramYears: programYearIds.length
-          ? {
-              create: programYearIds.map((pyid) => ({ programYearId: pyid })),
-            }
-          : undefined,
-      },
-      include: {
-        onProgramYears: {
-          include: { programYear: { include: { program: true } } },
+    const created = await prisma.$transaction(async (tx) => {
+      const subj = await tx.subject.create({
+        data: {
+          name,
+          code: code ?? null,
+          ects: typeof ects === "number" ? ects : null,
         },
-      },
+      });
+
+      await tx.subjectProgram.createMany({
+        data: programs.map((p) => ({
+          subjectId: subj.id,
+          programId: p.programId,
+          yearNumber: p.yearNumber,
+        })),
+      });
+
+      return tx.subject.findUnique({
+        where: { id: subj.id },
+        include: { subjectPrograms: { include: { program: true } } },
+      });
     });
+
     res.status(201).json(created);
   } catch (e) {
     res.status(409).json({ message: "DB error", detail: e.message });
   }
 });
 
-// GET /api/subjects/:id
+// READ
 router.get("/:id", async (req, res) => {
   const item = await prisma.subject.findUnique({
     where: { id: req.params.id },
-    include: {
-      onProgramYears: {
-        include: { programYear: { include: { program: true } } },
-      },
-    },
+    include: { subjectPrograms: { include: { program: true } } },
   });
   if (!item) return res.status(404).json({ message: "Not found" });
   res.json(item);
 });
 
-// PUT /api/subjects/:id
+// UPDATE
 router.put("/:id", async (req, res) => {
-  const parsed = subjectSchema.partial().safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
-
-  const { programYearIds, ...fields } = parsed.data;
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten() });
+  }
+  const { name, code, ects, programs } = parsed.data;
 
   try {
-    // update osnovnih polja
-    const updated = await prisma.subject.update({
-      where: { id: req.params.id },
-      data: {
-        ...(fields.code !== undefined ? { code: fields.code } : {}),
-        ...(fields.name !== undefined ? { name: fields.name } : {}),
-        ...(fields.ects !== undefined ? { ects: fields.ects ?? null } : {}),
-      },
-    });
+    const updated = await prisma.$transaction(async (tx) => {
+      const subj = await tx.subject.update({
+        where: { id: req.params.id },
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(code !== undefined ? { code } : {}),
+          ...(ects !== undefined ? { ects } : {}),
+        },
+      });
 
-    // ako je poslana lista veza, refresh veza
-    if (Array.isArray(programYearIds)) {
-      await prisma.subjectOnProgramYear.deleteMany({ where: { subjectId: req.params.id } });
-      if (programYearIds.length) {
-        await prisma.subjectOnProgramYear.createMany({
-          data: programYearIds.map((pyid) => ({
-            subjectId: req.params.id,
-            programYearId: pyid,
+      if (programs) {
+        await tx.subjectProgram.deleteMany({ where: { subjectId: subj.id } });
+        await tx.subjectProgram.createMany({
+          data: programs.map((p) => ({
+            subjectId: subj.id,
+            programId: p.programId,
+            yearNumber: p.yearNumber,
           })),
-          skipDuplicates: true,
         });
       }
-    }
 
-    const full = await prisma.subject.findUnique({
-      where: { id: req.params.id },
-      include: {
-        onProgramYears: {
-          include: { programYear: { include: { program: true } } },
-        },
-      },
+      return tx.subject.findUnique({
+        where: { id: subj.id },
+        include: { subjectPrograms: { include: { program: true } } },
+      });
     });
 
-    res.json(full);
+    res.json(updated);
   } catch (e) {
     res.status(400).json({ message: "Cannot update", detail: e.message });
   }
 });
 
-// DELETE /api/subjects/:id
+// DELETE
 router.delete("/:id", async (req, res) => {
   try {
-    await prisma.subjectOnProgramYear.deleteMany({ where: { subjectId: req.params.id } });
+    await prisma.subjectProgram.deleteMany({ where: { subjectId: req.params.id } });
     await prisma.subject.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ message: "Cannot delete", detail: e.message });
-  }
-});
-
-// GET /api/subjects/export.xlsx
-router.get("/export.xlsx", async (_req, res) => {
-  try {
-    const subjects = await prisma.subject.findMany({
-      orderBy: [{ code: "asc" }, { name: "asc" }],
-      include: {
-        onProgramYears: {
-          include: { programYear: { include: { program: true } } },
-        },
-      },
-    });
-
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Predmeti");
-
-    ws.columns = [
-      { header: "Code", key: "code", width: 12 },
-      { header: "Name", key: "name", width: 32 },
-      { header: "ECTS", key: "ects", width: 8 },
-      { header: "Programs/Years", key: "programs", width: 50 },
-    ];
-
-    for (const s of subjects) {
-      const tags = (s.onProgramYears || [])
-        .map((op) => `${op.programYear.program.name} — Year ${op.programYear.yearNumber}`)
-        .join(", ");
-      ws.addRow({
-        code: s.code,
-        name: s.name,
-        ects: s.ects ?? "",
-        programs: tags,
-      });
-    }
-
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", 'attachment; filename="predmeti.xlsx"');
-
-    await wb.xlsx.write(res);
-    res.end();
-  } catch (e) {
-    res.status(500).json({ message: "Export error", detail: e.message });
   }
 });
