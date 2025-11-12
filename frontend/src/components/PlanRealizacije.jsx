@@ -1,256 +1,343 @@
 // frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPut } from "../lib/api";
+import { apiGet, apiPost, apiPut } from "../lib/api";
 
-// prikaz angažmana
-function engagementLabel(code) {
-  if (code === "EMPLOYED") return "RO";
-  if (code === "EXTERNAL") return "VS";
-  return "-";
-}
-
-// 15 nastavnih sedmica
-const WEEKS = 15;
-
-// kod→fakultet (isto kao backend, radi headera)
-const FACULTY_BY_CODE = {
-  FIR: "Ekonomski fakultet",
-  SMDP: "Ekonomski fakultet",
-  RI: "Tehnički fakultet",
-  TUG: "Fakultet turizma, ugostiteljstva i gastronomije",
-  EP: "Biotehnički fakultet",
+const TITLE_MAP = {
+  PRACTITIONER: "Stručnjak iz prakse",
+  ASSISTANT: "Asistent",
+  SENIOR_ASSISTANT: "Viši asistent",
+  ASSISTANT_PROFESSOR: "Docent",
+  ASSOCIATE_PROFESSOR: "Vanr. prof.",
+  FULL_PROFESSOR: "Red. prof.",
+  PROFESSOR_EMERITUS: "Prof. emeritus",
 };
+const ENG_MAP = { EMPLOYED: "RO", EXTERNAL: "VS" }; // Radni odnos / Vanjski saradnik
 
 export default function PlanRealizacije() {
   const [programs, setPrograms] = useState([]);
-  const [professors, setProfessors] = useState([]);
-  const [programId, setProgramId] = useState("");
+  const [selectedProgramId, setSelectedProgramId] = useState("");
   const [year, setYear] = useState(1);
-
-  const [plan, setPlan] = useState(null); // {id, program, facultyName, yearNumber}
-  const [rows, setRows] = useState([]);   // PRNRow[]
+  const [plan, setPlan] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [profs, setProfs] = useState([]);
   const [msg, setMsg] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  // učitaj programe (filtriraj na FIR, SMDP, RI, TUG, EP po code)
-  async function loadPrograms() {
-    try {
-      const list = await apiGet("/api/prn/programs");
-      const keep = (list || []).filter(p =>
-        ["FIR","SMDP","RI","TUG","EP"].includes(p.code || "")
-      );
-      setPrograms(keep);
-      if (!programId && keep.length) setProgramId(keep[0].id);
-    } catch {
-      setPrograms([]);
-    }
-  }
-  async function loadProfessors() {
-    try {
-      const list = await apiGet("/api/professors");
-      setProfessors(Array.isArray(list) ? list : []);
-    } catch {
-      setProfessors([]);
-    }
-  }
+  // učitaj programe + profesore
+  useEffect(() => {
+    (async () => {
+      try {
+        const [ps, pf] = await Promise.all([
+          apiGet("/api/planrealizacije/programs"),
+          apiGet("/api/professors"),
+        ]);
+        setPrograms(ps);
+        setProfs(pf);
+        if (ps.length && !selectedProgramId) setSelectedProgramId(ps[0].id);
+      } catch (e) {
+        setMsg({ type: "err", text: e.message });
+      }
+    })();
+  }, []);
 
-  async function loadPlan() {
-    if (!programId || !year) return;
-    setMsg(null);
+  // učitaj/kreiraj plan za izabrani program i godinu
+  useEffect(() => {
+    if (!selectedProgramId) return;
+    (async () => {
+      setLoading(true);
+      setMsg(null);
+      try {
+        const data = await apiGet(
+          `/api/planrealizacije/plan?programId=${encodeURIComponent(selectedProgramId)}&year=${year}`
+        );
+        setPlan(data.plan);
+        setRows(
+          (data.rows || []).map((r) => ({
+            ...r,
+            _edit: {
+              professorId: r.professorId || "",
+              lectureTotal: r.lectureTotal ?? 0,
+              exerciseTotal: r.exerciseTotal ?? 0,
+              saving: false,
+            },
+          }))
+        );
+      } catch (e) {
+        setPlan(null);
+        setRows([]);
+        setMsg({ type: "err", text: e.message });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [selectedProgramId, year]);
+
+  async function seedPrograms() {
     try {
-      const data = await apiGet(`/api/prn/plan?programId=${encodeURIComponent(programId)}&year=${year}`);
-      setPlan(data.plan);
-      setRows(data.rows || []);
+      setMsg(null);
+      const res = await apiPost("/api/planrealizacije/seed-programs", {});
+      setPrograms(res.programs || []);
+      if (res.programs?.length) setSelectedProgramId(res.programs[0].id);
     } catch (e) {
-      setPlan(null);
-      setRows([]);
       setMsg({ type: "err", text: e.message });
     }
   }
 
-  useEffect(() => { loadPrograms(); loadProfessors(); }, []);
-  useEffect(() => { if (programId) loadPlan(); }, [programId, year]);
-
-  // pomoćni izračuni
-  function rowTotals(r) {
-    const L = Number(r.lectureTotal || 0);
-    const E = Number(r.exerciseTotal || 0);
-    return { L, E, T: L + E, Lw: L / WEEKS, Ew: E / WEEKS, Tw: (L + E) / WEEKS };
+  function changeRow(id, patch) {
+    setRows((arr) =>
+      arr.map((r) => (r.id === id ? { ...r, _edit: { ...r._edit, ...patch } } : r))
+    );
   }
 
-  // ukupni sabiri po angažmanu
-  const totals = useMemo(() => {
-    let ro = 0, vs = 0;
-    rows.forEach(r => {
-      const { T } = rowTotals(r);
-      if (r.professor?.engagement === "EMPLOYED") ro += T;
-      else if (r.professor?.engagement === "EXTERNAL") vs += T;
+  async function saveRow(r) {
+    if (!r?._edit) return;
+    const body = {
+      professorId:
+        r._edit.professorId === "" ? null : String(r._edit.professorId),
+      lectureTotal: Number(r._edit.lectureTotal) || 0,
+      exerciseTotal: Number(r._edit.exerciseTotal) || 0,
+    };
+    changeRow(r.id, { saving: true });
+    try {
+      await apiPut(`/api/planrealizacije/rows/${r.id}`, body);
+      setMsg({ type: "ok", text: "Sačuvano" });
+      // odražaj lokalno (bez refetcha)
+      setRows((arr) =>
+        arr.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                professorId: body.professorId,
+                lectureTotal: body.lectureTotal,
+                exerciseTotal: body.exerciseTotal,
+                professor:
+                  body.professorId
+                    ? profs.find((p) => p.id === body.professorId) || null
+                    : null,
+                _edit: { ...x._edit, saving: false },
+              }
+            : x
+        )
+      );
+    } catch (e) {
+      setMsg({ type: "err", text: e.message });
+      changeRow(r.id, { saving: false });
+    }
+  }
+
+  // proračuni
+  const computed = useMemo(() => {
+    const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
+    rows.forEach((r) => {
+      const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
+      const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
+      const bucket = r.professor?.engagement ? ENG_MAP[r.professor.engagement] : null;
+      total.ALL.L += L; total.ALL.E += E;
+      if (bucket === "RO") { total.RO.L += L; total.RO.E += E; }
+      else if (bucket === "VS") { total.VS.L += L; total.VS.E += E; }
     });
-    return { ro, vs, all: ro + vs };
+    const sum = (obj) => obj.L + obj.E;
+    return {
+      total,
+      sumALL: sum(total.ALL),
+      sumRO: sum(total.RO),
+      sumVS: sum(total.VS),
+    };
   }, [rows]);
 
-  function ectsLabel(s) {
-    return (s?.ects ?? "") !== "" && s?.ects != null ? `ECTS: ${s.ects}` : "";
-  }
-  function sharedLabel(s) {
-    const count = (s?.subjectPrograms || []).length;
-    return count > 1 ? "Zajednički predmet" : "";
-  }
-
-  // inline izmjena reda
-  async function updateRow(id, patch) {
-    try {
-      const updated = await apiPut(`/api/prn/rows/${id}`, patch);
-      setRows(rs => rs.map(r => (r.id === id ? { ...r, ...updated } : r)));
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
-    }
-  }
+  const currentProgram = programs.find((p) => p.id === selectedProgramId);
 
   return (
     <div>
-      {/* filter traka */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:12 }}>
-        <div>
-          <label style={{ opacity:.8, fontSize:12 }}>Studijski program</label><br/>
-          <select className="input" value={programId} onChange={e=>setProgramId(e.target.value)}>
-            {programs.map(p => (
-              <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label style={{ opacity:.8, fontSize:12 }}>Godina</label><br/>
-          <div style={{display:"flex", gap:8}}>
-            {[1,2,3,4].map(n => (
-              <button key={n}
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+        <h2>Plan realizacije nastave</h2>
+        <div style={{display:"flex", gap:8, alignItems:"center"}}>
+          {programs.length === 0 ? (
+            <button className="btn" onClick={seedPrograms}>Dodaj standardne studijske programe</button>
+          ) : null}
+          <div style={{display:"flex", gap:6}}>
+            {[1,2,3,4].map(y => (
+              <button
+                key={y}
                 className="btn"
-                style={{ background: year===n ? "#444" : undefined }}
-                onClick={()=>setYear(n)}
-              >{n}</button>
+                style={{opacity: year===y?1:0.7}}
+                onClick={()=>setYear(y)}
+              >
+                Godina {y}
+              </button>
             ))}
           </div>
         </div>
-        <button className="btn" onClick={loadPlan}>Refresh</button>
-        {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
       </div>
 
-      {/* header */}
-      {plan && (
-        <div style={{ marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>Plan realizacije nastave</h2>
-          <div style={{ opacity:.9 }}>
-            {FACULTY_BY_CODE[plan.program.code || ""] || plan.facultyName || ""} &mdash; {plan.program.name}{plan.program.code ? ` (${plan.program.code})` : ""} — {year}. godina
+      {/* Tabs programi */}
+      <div style={{display:"flex", gap:8, flexWrap:"wrap", margin:"8px 0"}}>
+        {programs.map(p => (
+          <button
+            key={p.id}
+            className="btn"
+            style={{
+              background: selectedProgramId===p.id ? "#2a2f3a" : "transparent",
+              border: "1px solid #3a4152"
+            }}
+            onClick={()=>setSelectedProgramId(p.id)}
+            title={p.name}
+          >
+            {p.code || p.name}
+          </button>
+        ))}
+      </div>
+
+      {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
+
+      {loading ? (
+        <div>Učitavanje…</div>
+      ) : !currentProgram ? (
+        <div>Nema programa. Pokreni seed iznad.</div>
+      ) : !plan ? (
+        <div>Nema podataka za prikaz.</div>
+      ) : (
+        <>
+          {/* Header */}
+          <div style={{margin:"12px 0"}}>
+            <div style={{fontSize:18, fontWeight:700}}>Plan realizacije nastave</div>
+            <div>{plan.facultyName}</div>
+            <div>{currentProgram.name} ({currentProgram.code}) — Godina {plan.yearNumber}</div>
           </div>
-        </div>
+
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Predmet</th>
+                <th>P/V</th>
+                <th>Nastavnici</th>
+                <th>Angažman</th>
+                <th colSpan={3}>Pokrivenost ukupno</th>
+                <th colSpan={3}>Pokrivenost sedmična</th>
+                <th></th>
+              </tr>
+              <tr>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={11}>Nema redova</td></tr>
+              ) : rows.map(r => {
+                const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
+                const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
+                const U = L + E;
+                const Lw = (L/15) || 0;
+                const Ew = (E/15) || 0;
+                const Uw = (U/15) || 0;
+                const subj = r.subject || {};
+                const ects = subj.ects ?? "";
+                const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
+                const profId = r._edit?.professorId ?? r.professorId ?? "";
+                const prof = profs.find(p=>p.id===profId) || r.professor || null;
+                const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+                const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
+
+                return (
+                  <tr key={r.id}>
+                    <td>
+                      <div style={{fontWeight:600}}>{subj.name}</div>
+                      <div style={{fontSize:12, opacity:0.8}}>
+                        {subj.code ? `(${subj.code}) ` : ""}ECTS: {ects === "" ? "-" : ects}
+                        {joint ? " • Zajednički predmet" : ""}
+                      </div>
+                    </td>
+                    <td>P/V</td>
+                    <td style={{minWidth:220}}>
+                      <select
+                        className="input"
+                        value={String(profId)}
+                        onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}
+                      >
+                        <option value="">— odaberi —</option>
+                        {profs.map(p=>(
+                          <option key={p.id} value={p.id}>
+                            {p.name}{p.title?` — ${TITLE_MAP[p.title]||p.title}`:""}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{anga}</td>
+                    <td>
+                      <input
+                        className="input small"
+                        value={L}
+                        onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })}
+                        inputMode="numeric"
+                        style={{maxWidth:90}}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        className="input small"
+                        value={E}
+                        onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })}
+                        inputMode="numeric"
+                        style={{maxWidth:90}}
+                      />
+                    </td>
+                    <td>{U}</td>
+                    <td>{Lw.toFixed(2)}</td>
+                    <td>{Ew.toFixed(2)}</td>
+                    <td>{Uw.toFixed(2)}</td>
+                    <td style={{whiteSpace:"nowrap"}}>
+                      <button className="btn" disabled={r._edit?.saving} onClick={()=>saveRow(r)}>
+                        {r._edit?.saving ? "..." : "Save"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Totali */}
+              <tr>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
+                <td>{computed.total.RO.L}</td>
+                <td>{computed.total.RO.E}</td>
+                <td>{computed.sumRO}</td>
+                <td>{(computed.total.RO.L/15).toFixed(2)}</td>
+                <td>{(computed.total.RO.E/15).toFixed(2)}</td>
+                <td>{(computed.sumRO/15).toFixed(2)}</td>
+                <td></td>
+              </tr>
+              <tr>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz honorarnog angažmana (VS):</td>
+                <td>{computed.total.VS.L}</td>
+                <td>{computed.total.VS.E}</td>
+                <td>{computed.sumVS}</td>
+                <td>{(computed.total.VS.L/15).toFixed(2)}</td>
+                <td>{(computed.total.VS.E/15).toFixed(2)}</td>
+                <td>{(computed.sumVS/15).toFixed(2)}</td>
+                <td></td>
+              </tr>
+              <tr>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
+                <td>{computed.total.ALL.L}</td>
+                <td>{computed.total.ALL.E}</td>
+                <td>{computed.sumALL}</td>
+                <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.E/15).toFixed(2)}</td>
+                <td>{(computed.sumALL/15).toFixed(2)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </>
       )}
-
-      {/* tabela */}
-      <div style={{ overflowX:"auto" }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Predmet</th>
-              <th>P/V</th>
-              <th>Nastavnik</th>
-              <th>Angažman</th>
-              <th colSpan={3}>Pokrivenost ukupno — I semestar</th>
-              <th colSpan={3}>Pokrivenost sedmična</th>
-              <th></th>
-            </tr>
-            <tr>
-              <th colSpan={4}></th>
-              <th>Pred.</th>
-              <th>Vjež.</th>
-              <th>Ukupno</th>
-              <th>Pred.</th>
-              <th>Vjež.</th>
-              <th>Ukupno</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={11}>[]</td></tr>
-            ) : rows.map(r => {
-              const sums = rowTotals(r);
-              const subj = r.subject || {};
-              const pvBadge = "P/V";
-              return (
-                <tr key={r.id}>
-                  <td>
-                    <div style={{ fontWeight:600 }}>{subj.name}{subj.code ? ` (${subj.code})` : ""}</div>
-                    <div style={{ fontSize:12, opacity:.85 }}>
-                      {ectsLabel(subj)}{sharedLabel(subj) ? ` — ${sharedLabel(subj)}` : ""}
-                    </div>
-                  </td>
-                  <td style={{ textAlign:"center" }}>
-                    <span style={{ padding:"2px 6px", border:"1px solid #555", borderRadius:6, fontSize:12 }}>{pvBadge}</span>
-                  </td>
-                  <td style={{ minWidth:220 }}>
-                    <select
-                      className="input"
-                      value={r.professorId || ""}
-                      onChange={(e)=>updateRow(r.id, { professorId: e.target.value || null })}
-                    >
-                      <option value="">— odaberi —</option>
-                      {professors.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td style={{ textAlign:"center" }}>
-                    {engagementLabel(r.professor?.engagement)}
-                  </td>
-
-                  {/* ukupno semestar: inputi za predavanja i vježbe, ukupno = readOnly */}
-                  <td style={{ width:100 }}>
-                    <input className="input small" inputMode="numeric"
-                      value={r.lectureTotal ?? 0}
-                      onChange={(e)=>updateRow(r.id, { lectureTotal: Number(e.target.value || 0) })}
-                    />
-                  </td>
-                  <td style={{ width:100 }}>
-                    <input className="input small" inputMode="numeric"
-                      value={r.exerciseTotal ?? 0}
-                      onChange={(e)=>updateRow(r.id, { exerciseTotal: Number(e.target.value || 0) })}
-                    />
-                  </td>
-                  <td style={{ textAlign:"right", width:90 }}>{sums.T}</td>
-
-                  {/* sedmična = /15, zaokruži na 2 decimale */}
-                  <td style={{ textAlign:"right", width:90 }}>{(sums.Lw).toFixed(2)}</td>
-                  <td style={{ textAlign:"right", width:90 }}>{(sums.Ew).toFixed(2)}</td>
-                  <td style={{ textAlign:"right", width:90 }}>{(sums.Tw).toFixed(2)}</td>
-
-                  <td></td>
-                </tr>
-              );
-            })}
-          </tbody>
-
-          {/* footer sabiranja */}
-          <tfoot>
-            <tr>
-              <td colSpan={6} style={{ textAlign:"right", fontWeight:600 }}>Ukupno iz radnog odnosa</td>
-              <td style={{ textAlign:"right", fontWeight:600 }}>{totals.ro}</td>
-              <td colSpan={3}></td>
-              <td></td>
-            </tr>
-            <tr>
-              <td colSpan={6} style={{ textAlign:"right", fontWeight:600 }}>Ukupno iz honorarnog angažmana</td>
-              <td style={{ textAlign:"right", fontWeight:600 }}>{totals.vs}</td>
-              <td colSpan={3}></td>
-              <td></td>
-            </tr>
-            <tr>
-              <td colSpan={6} style={{ textAlign:"right", fontWeight:900 }}>Ukupno</td>
-              <td style={{ textAlign:"right", fontWeight:900 }}>{totals.all}</td>
-              <td colSpan={3}></td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
     </div>
   );
 }
