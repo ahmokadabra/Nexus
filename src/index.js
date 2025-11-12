@@ -11,6 +11,9 @@ import { router as cyclesRouter } from "./routes/cycles.js";
 import { router as termsRouter } from "./routes/terms.js";
 import { router as coursesRouter } from "./routes/courses.js";
 import entriesRouter from "./routes/entries.js";
+import { router as prnRouter } from "./routes/prn-routes.js";          // ✅ promijenjeno ime fajla
+import { router as planRealizacijeRouter } from "./routes/planrealizacije.js";
+
 
 // ✅ PRAVILAN import + naziv varijable (ovo je falilo/različito imenovano)
 import { router as planRealizacijeRouter } from "./routes/planrealizacije.js";
@@ -32,7 +35,7 @@ app.use("/api/terms", termsRouter);
 app.use("/api/courses", coursesRouter);
 app.use("/api/entries", entriesRouter);
 
-// ✅ koristi isti naziv koji si importovao
+app.use("/api/prn", prnRouter);                    // ✅ path ostaje isti
 app.use("/api/planrealizacije", planRealizacijeRouter);
 
 // start
