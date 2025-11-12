@@ -1,4 +1,5 @@
 ﻿// src/index.js
+import { router as studyProgramsRouter } from "./routes/study-programs.js";
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -28,9 +29,14 @@ app.get('/health', (_req, res) =>
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'backend', message: 'API is running' });
 });
+app.get("/api/programs", async (_req, res) => {
+  const rows = await prisma.studyProgram.findMany({ orderBy: [{ name: "asc" }] });
+  res.json(rows);
+});
 
 // ---- API rute ----
 app.use('/api/professors', professorsRouter);
+app.use("/api/study-programs", studyProgramsRouter);
 app.use('/api/subjects',   subjectsRouter);
 app.use('/api/rooms',      roomsRouter);
 app.use('/api/planrealizacije', planrealizacijeRouter);
