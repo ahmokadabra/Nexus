@@ -1,68 +1,47 @@
 ﻿// src/index.js
+import express from "express";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// ✅ Uvezi Prisma (zbog health check-a i eventualnih pingova)
+import { prisma } from "./prisma.js";
+
+// ✅ Uvezi naše routere
+import { router as planrealizacijeRouter } from "./routes/planrealizacije.js";
 import { router as studyProgramsRouter } from "./routes/study-programs.js";
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import { fileURLToPath } from 'node:url';
-import path, { dirname, join } from 'node:path';
-import fs from 'node:fs';
-
-import { router as professorsRouter } from './routes/professors.js';
-import { router as subjectsRouter } from './routes/subjects.js';
-import { router as roomsRouter } from './routes/rooms.js';
-import { router as planrealizacijeRouter } from './routes/planrealizacije.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-
 app.use(cors());
 app.use(express.json());
 
-// ---- Health & root (da Render ne gađa index.html) ----
-app.get('/health', (_req, res) =>
-  res.json({ ok: true, service: 'backend', env: process.env.NODE_ENV || 'development' })
-);
-// root neka vrati info, ne šalji SPA ovdje u produkciji
-app.get('/', (_req, res) => {
-  res.json({ ok: true, service: 'backend', message: 'API is running' });
-});
-app.get("/api/programs", async (_req, res) => {
-  const rows = await prisma.studyProgram.findMany({ orderBy: [{ name: "asc" }] });
-  res.json(rows);
+// Health
+app.get("/health", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, db: "up" });
+  } catch (e) {
+    res.status(500).json({ ok: false, db: "down", error: String(e?.message || e) });
+  }
 });
 
-// ---- API rute ----
-app.use('/api/professors', professorsRouter);
+// ✅ Montiraj routere (nema inline .findMany u index.js!)
+app.use("/api/planrealizacije", planrealizacijeRouter);
 app.use("/api/programs", studyProgramsRouter);
-app.use('/api/subjects',   subjectsRouter);
-app.use('/api/rooms',      roomsRouter);
-app.use('/api/planrealizacije', planrealizacijeRouter);
 
-// ---- (opcionalno) posluži frontend SAMO kad postoji build ili je traženo SERVE_FRONT ----
-const distDir = join(__dirname, '../frontend/dist');
-const shouldServeFront =
-  process.env.SERVE_FRONT === '1' || process.env.SERVE_FRONT === 'true';
-
-if (shouldServeFront && fs.existsSync(distDir)) {
-  console.log('Serving frontend from', distDir);
-  app.use(express.static(distDir));
-  app.get('*', (_req, res) => {
-    res.sendFile(join(distDir, 'index.html'));
-  });
+// -- opcionalno serviranje frontenda (drži isključeno na Renderu ako frontend ima svoj servis)
+const SERVE_FRONT = process.env.SERVE_FRONT === "1";
+if (SERVE_FRONT) {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const distPath = path.join(__dirname, "..", "frontend", "dist");
+  app.use(express.static(distPath));
+  app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
 } else {
-  console.log('Not serving frontend from backend (no dist or SERVE_FRONT not set).');
-  // 404 za sve ostalo što nije / ili /health i nije /api/*
-  app.use((req, res) => {
-    if (!req.path.startsWith('/api')) {
-      return res.status(200).json({ ok: true, service: 'backend', route: req.path });
-    }
-    res.status(404).json({ message: 'Not found' });
-  });
+  console.log("Not serving frontend from backend (no dist or SERVE_FRONT not set).");
 }
 
-app.listen(PORT, () => {
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
