@@ -1,3 +1,4 @@
+// frontend/src/App.jsx
 import React, { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import PlanRealizacije from "./components/PlanRealizacije.jsx";
@@ -9,7 +10,9 @@ const Logo = ({ size = 120 }) => (
     src="/logo.svg"
     alt="Nexus"
     style={{ width: size, height: "auto" }}
-    onError={(e)=>{ e.currentTarget.style.display="none"; }}
+    onError={(e) => {
+      e.currentTarget.style.display = "none";
+    }}
   />
 );
 
@@ -17,22 +20,38 @@ export default function App() {
   const [active, setActive] = useState(null);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", minHeight: "100vh" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "100px 1fr",
+        minHeight: "100vh",
+      }}
+    >
       <Sidebar active={active} onSelect={setActive} />
 
       <main style={{ padding: 24 }}>
         {/* Header se pokazuje kad nije početni ekran */}
         {active && (
-          <header style={{
-            display: "flex", alignItems: "center", gap: 12,
-            borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 16
-          }}>
+          <header
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              borderBottom: "1px solid var(--border)",
+              paddingBottom: 12,
+              marginBottom: 16,
+            }}
+          >
             <Logo size={42} />
             <h1 style={{ margin: 0, fontSize: 22 }}>
-              {active === "db" ? "Baza podataka"
-                : active === "plan" ? "Plan realizacije nastave"
-                : active === "opterećenje" ? "Opterećenje nastavnika"
-                : active === "raspored" ? "Raspored nastave"
+              {active === "db"
+                ? "Baza podataka"
+                : active === "plan"
+                ? "Plan realizacije nastave"
+                : active === "opterećenje"
+                ? "Opterećenje nastavnika"
+                : active === "raspored"
+                ? "Raspored nastave"
                 : "Biblioteka"}
             </h1>
           </header>
@@ -40,7 +59,13 @@ export default function App() {
 
         {/* Početni ekran = samo logo, centriran */}
         {!active && (
-          <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
+          <div
+            style={{
+              minHeight: "70vh",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
             <div style={{ textAlign: "center" }}>
               <Logo size={160} />
               <div style={{ marginTop: 12, fontSize: 18, color: "var(--muted)" }}>
@@ -55,27 +80,29 @@ export default function App() {
 
         {active === "db" && <DatabasePage />}
 
-        {active === "plan" && (
-          <div className="card">
-            <p style={{ color: "var(--muted)" }}>Ovdje će ići alat za “Plan realizacije nastave”. (Placeholder)</p>
-          </div>
-        )}
+        {active === "plan" && <PlanRealizacije />}
 
         {active === "opterećenje" && (
           <div className="card">
-            <p style={{ color: "var(--muted)" }}>Ovdje će ići “Opterećenje nastavnika”. (Placeholder)</p>
+            <p style={{ color: "var(--muted)" }}>
+              Ovdje će ići “Opterećenje nastavnika”. (Placeholder)
+            </p>
           </div>
         )}
 
         {active === "raspored" && (
           <div className="card">
-            <p style={{ color: "var(--muted)" }}>Ovdje će ići “Raspored nastave”. (Placeholder)</p>
+            <p style={{ color: "var(--muted)" }}>
+              Ovdje će ići “Raspored nastave”. (Placeholder)
+            </p>
           </div>
         )}
 
         {active === "biblioteka" && (
           <div className="card">
-            <p style={{ color: "var(--muted)" }}>Ovdje će ići “Biblioteka”. (Placeholder)</p>
+            <p style={{ color: "var(--muted)" }}>
+              Ovdje će ići “Biblioteka”. (Placeholder)
+            </p>
           </div>
         )}
       </main>
