@@ -28,6 +28,7 @@ app.get("/health", async (_req, res) => {
 // ✅ Montiraj routere (nema inline .findMany u index.js!)
 app.use("/api/planrealizacije", planrealizacijeRouter);
 app.use("/api/programs", studyProgramsRouter);
+app.use("/api/study-programs", studyProgramsRouter);
 
 // -- opcionalno serviranje frontenda (drži isključeno na Renderu ako frontend ima svoj servis)
 const SERVE_FRONT = process.env.SERVE_FRONT === "1";
