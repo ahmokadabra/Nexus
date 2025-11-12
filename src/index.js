@@ -36,7 +36,7 @@ app.get("/api/programs", async (_req, res) => {
 
 // ---- API rute ----
 app.use('/api/professors', professorsRouter);
-app.use("/api/study-programs", studyProgramsRouter);
+app.use("/api/programs", studyProgramsRouter);
 app.use('/api/subjects',   subjectsRouter);
 app.use('/api/rooms',      roomsRouter);
 app.use('/api/planrealizacije', planrealizacijeRouter);
