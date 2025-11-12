@@ -9,10 +9,14 @@ import { router as professorsRouter } from "./routes/professors.js";
 import { router as subjectsRouter } from "./routes/subjects.js";
 import { router as roomsRouter } from "./routes/rooms.js";
 import { router as planRealizacijeRouter } from "./routes/planrealizacije.js";
-import { router as studyProgramsRouter } from "./routes/study-programs.js"; // <-- važan import
+import { router as studyProgramsRouter } from "./routes/study-programs.js";
 
 const app = express();
-app.use(cors());
+
+// ✅ CORS + preflight (ovo rješava OPTIONS)
+app.use(cors({ origin: true, credentials: false }));
+app.options("*", cors({ origin: true, credentials: false }));
+
 app.use(express.json());
 
 // Health (Render health checks)
@@ -31,17 +35,17 @@ app.use("/api/subjects", subjectsRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/planrealizacije", planRealizacijeRouter);
 
-// Studijski programi – oba puta rade (kompatibilnost)
+// Studijski programi – oba puta rade (kompat)
 app.use("/api/programs", studyProgramsRouter);
 app.use("/api/study-programs", studyProgramsRouter);
 
-// Optional: serviranje frontenda (samo ako želiš iz backenda)
+// (Opc.) serviraj frontend iz backenda samo ako baš želiš
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 if (process.env.SERVE_FRONT && process.env.SERVE_FRONT !== "0") {
   const distDir = path.join(__dirname, "../frontend/dist");
   app.use(express.static(distDir));
-  app.get("*", (req, res) => res.sendFile(path.join(distDir, "index.html")));
+  app.get("*", (_req, res) => res.sendFile(path.join(distDir, "index.html")));
 } else {
   console.log("Not serving frontend from backend (no dist or SERVE_FRONT not set).");
 }
