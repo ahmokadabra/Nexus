@@ -66,3 +66,21 @@ export async function downloadXlsx(path, filename = "data.xlsx") {
   a.remove();
   URL.revokeObjectURL(a.href);
 }
+// frontend/src/lib/api.js
+const DEFAULT_BASE =
+  typeof window !== "undefined" &&
+  window.location.hostname.endsWith("onrender.com") &&
+  !/backend/i.test(window.location.hostname)
+    ? "https://nexus-backend-ijh0.onrender.com"
+    : "";
+
+const RAW_BASE = (import.meta?.env?.VITE_API_BASE ?? window.__API_BASE__ ?? DEFAULT_BASE).trim();
+const apiBase = RAW_BASE ? RAW_BASE.replace(/\/+$/, "") : "";
+
+export function apiUrl(path) {
+  if (/^https?:\/\//i.test(path)) return path;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return apiBase ? `${apiBase}${p}` : p;
+}
+
+// ... ostatak ostaje isti (apiFetch, apiGet, apiPost, ...)

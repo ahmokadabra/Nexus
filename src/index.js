@@ -13,13 +13,13 @@ import { router as studyProgramsRouter } from "./routes/study-programs.js";
 
 const app = express();
 
-// ✅ CORS + preflight (ovo rješava OPTIONS)
+// ✅ CORS + preflight
 app.use(cors({ origin: true, credentials: false }));
 app.options("*", cors({ origin: true, credentials: false }));
 
 app.use(express.json());
 
-// Health (Render health checks)
+// ✅ Health (i /api/health radi)
 app.get("/health", async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
@@ -28,18 +28,19 @@ app.get("/health", async (_req, res) => {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-// API mount
+// ✅ API rute
 app.use("/api/professors", professorsRouter);
 app.use("/api/subjects", subjectsRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/planrealizacije", planRealizacijeRouter);
 
-// Studijski programi – oba puta rade (kompat)
+// Studijski programi – obje putanje rade
 app.use("/api/programs", studyProgramsRouter);
 app.use("/api/study-programs", studyProgramsRouter);
 
-// (Opc.) serviraj frontend iz backenda samo ako baš želiš
+// (Opcionalno) serviraj frontend iz backenda ako želiš
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 if (process.env.SERVE_FRONT && process.env.SERVE_FRONT !== "0") {
