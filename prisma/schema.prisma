@@ -31,39 +31,41 @@ enum WeekType {
 }
 
 model Professor {
-  id            String          @id @default(cuid())
-  name          String
-  email         String?         @unique
-  phone         String?
-  title         ProfessorTitle?
-  engagement    Engagement?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id         String          @id @default(cuid())
+  name       String
+  email      String?         @unique
+  phone      String?
+  title      ProfessorTitle?
+  engagement Engagement?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
-  courses          Course[]
-  scheduleEntries  ScheduleEntry[]
+  courses         Course[]
+  scheduleEntries ScheduleEntry[]
+  prnRows         PRNRow[] // ⬅️ back-relation za PRNRow
 }
 
 model Subject {
   id        String   @id @default(cuid())
-  code      String?  @unique          // <-- više nije obavezno
+  code      String?  @unique // code je opcionalan
   name      String
   ects      Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  courses          Course[]
-  subjectPrograms  SubjectProgram[]   // <-- join prema StudyProgram
+  courses         Course[]
+  subjectPrograms SubjectOnProgramYear[] // ⬅️ join sa programima
+  prnRows         PRNRow[] // ⬅️ back-relation za PRNRow
 }
 
 model Room {
-  id         String   @id @default(cuid())
-  name       String   @unique
-  shortCode  String?  @unique
-  capacity   Int?
-  isOnline   Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  name      String   @unique
+  shortCode String?  @unique
+  capacity  Int?
+  isOnline  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   scheduleEntries ScheduleEntry[]
 }
@@ -76,170 +78,124 @@ model Cycle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  terms     Term[]
+  terms Term[]
 }
 
 model Term {
-  id        String      @id @default(cuid())
-  cycle     Cycle       @relation(fields: [cycleId], references: [id])
+  id        String    @id @default(cuid())
+  cycle     Cycle     @relation(fields: [cycleId], references: [id])
   cycleId   String
   name      String
   dateStart DateTime?
   dateEnd   DateTime?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   courses         Course[]
   scheduleEntries ScheduleEntry[]
 }
 
 model StudyProgram {
-  id        String       @id @default(cuid())
+  id        String   @id @default(cuid())
   name      String
-  code      String?      @unique
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  code      String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  years            ProgramYear[]
-  subjectPrograms  SubjectProgram[]   // <-- join prema Subject
+  years           ProgramYear[]
+  subjectPrograms SubjectOnProgramYear[] // ⬅️ join
+  prnPlans        PRNPlan[] // ⬅️ back-relation za PRNPlan
 }
 
 model ProgramYear {
-  id           String       @id @default(cuid())
-  program      StudyProgram @relation(fields: [programId], references: [id])
-  programId    String
-  yearNumber   Int
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id         String       @id @default(cuid())
+  program    StudyProgram @relation(fields: [programId], references: [id])
+  programId  String
+  yearNumber Int
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+// Predmet ↔ StudyProgram uz godinu
+model SubjectOnProgramYear {
+  id         String       @id @default(cuid())
+  subject    Subject      @relation(fields: [subjectId], references: [id])
+  subjectId  String
+  program    StudyProgram @relation(fields: [programId], references: [id])
+  programId  String
+  yearNumber Int
+
+  @@unique([subjectId, programId], name: "uniq_subject_program")
 }
 
 model Course {
-  id            String    @id @default(cuid())
-  subject       Subject   @relation(fields: [subjectId], references: [id])
-  subjectId     String
-  professor     Professor @relation(fields: [professorId], references: [id])
-  professorId   String
-  term          Term      @relation(fields: [termId], references: [id])
-  termId        String
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  subject     Subject   @relation(fields: [subjectId], references: [id])
+  subjectId   String
+  professor   Professor @relation(fields: [professorId], references: [id])
+  professorId String
+  term        Term      @relation(fields: [termId], references: [id])
+  termId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   scheduleEntries ScheduleEntry[]
 }
 
 model ScheduleEntry {
-  id          String     @id @default(cuid())
-  term        Term       @relation(fields: [termId], references: [id])
+  id          String    @id @default(cuid())
+  term        Term      @relation(fields: [termId], references: [id])
   termId      String
-  course      Course     @relation(fields: [courseId], references: [id])
+  course      Course    @relation(fields: [courseId], references: [id])
   courseId    String
-  professor   Professor  @relation(fields: [professorId], references: [id])
+  professor   Professor @relation(fields: [professorId], references: [id])
   professorId String
-  room        Room       @relation(fields: [roomId], references: [id])
+  room        Room      @relation(fields: [roomId], references: [id])
   roomId      String
 
-  groupName   String?
-  dayOfWeek   Int
-  startMin    Int
-  endMin      Int
-  weekType    WeekType?
-  isOnline    Boolean?
-  note        String?
+  groupName String?
+  dayOfWeek Int
+  startMin  Int
+  endMin    Int
+  weekType  WeekType?
+  isOnline  Boolean?
+  note      String?
 
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-// NEW: Join tabela Subject <-> StudyProgram, sa yearNumber
-model SubjectProgram {
-  subjectId  String
-  programId  String
-  yearNumber Int
-
-  subject    Subject      @relation(fields: [subjectId], references: [id])
-  program    StudyProgram @relation(fields: [programId], references: [id])
-
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  @@id([subjectId, programId]) // po subjektu i programu jedinstveno, yearNumber se može mijenjati
-}
-/// --- PRN: Plan realizacije nastave ---
+// ================= PRN =================
 
 model PRNPlan {
-  id         String        @id @default(cuid())
-  program    StudyProgram  @relation(fields: [programId], references: [id])
+  id         String       @id @default(cuid())
+  program    StudyProgram @relation(fields: [programId], references: [id])
   programId  String
-  yearNumber Int
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  yearNumber Int // 1..4
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
   rows PRNRow[]
 
-  @@unique([programId, yearNumber]) // jedan plan po programu i godini
+  @@unique([programId, yearNumber], name: "uniq_plan_per_program_year")
 }
 
 model PRNRow {
-  id            String     @id @default(cuid())
-  plan          PRNPlan    @relation(fields: [planId], references: [id])
-  planId        String
+  id     String  @id @default(cuid())
+  plan   PRNPlan @relation(fields: [planId], references: [id])
+  planId String
 
-  subject       Subject    @relation(fields: [subjectId], references: [id])
-  subjectId     String
+  subject   Subject @relation(fields: [subjectId], references: [id])
+  subjectId String
 
-  // opcionalno: odgovorni profesor za predmet (jednostavna 1:1 varijanta)
-  professor     Professor? @relation(fields: [professorId], references: [id])
-  professorId   String?
+  professor   Professor? @relation(fields: [professorId], references: [id])
+  professorId String?
 
-  // ukupna pokrivenost u semestru (brojevi unosiš ti)
-  lectureTotal  Int?       @default(0)
-  exerciseTotal Int?       @default(0)
+  // semestralna pokrivenost (sati)
+  lectureHours  Int? // Predavanja
+  exerciseHours Int? // Vježbe
 
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-
-  @@unique([planId, subjectId]) // po predmetu jednom unutar plana
-}
-model StudyProgram {
-  id        String       @id @default(cuid())
-  name      String
-  code      String?      @unique
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
-
-  years     ProgramYear[]
-
-  // ⬇️ NOVO: back-relation ka PRNPlan
-  prnPlans  PRNPlan[]
-}
-
-model Subject {
-  id        String   @id @default(cuid())
-  code      String?  @unique
-  name      String
-  ects      Int?
+  note      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  courses   Course[]
-
-  // ⬇️ NOVO: back-relation ka PRNRow
-  prnRows   PRNRow[]
-}
-
-model Professor {
-  id            String          @id @default(cuid())
-  name          String
-  email         String?         @unique
-  phone         String?
-  title         ProfessorTitle?
-  engagement    Engagement?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-
-  courses          Course[]
-  scheduleEntries  ScheduleEntry[]
-
-  // ⬇️ NOVO: back-relation ka PRNRow (professor je opcionalan u PRNRow)
-  prnRows         PRNRow[]
 }
