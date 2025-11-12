@@ -131,3 +131,30 @@ router.put("/rows/:id", async (req, res) => {
     res.status(400).json({ message: "Cannot update", detail: e.message });
   }
 });
+// src/routes/planrealizacije.js
+import { Router } from "express";
+import { prisma } from "../prisma.js";
+
+export const router = Router();
+
+// ping
+router.get("/health", (_req, res) => res.json({ ok: true, scope: "planrealizacije" }));
+
+// lista planova (opcionalno, čisto da route radi)
+router.get("/", async (req, res) => {
+  const { programId, year } = req.query;
+  const where = {};
+  if (programId) where.programId = String(programId);
+  if (year) where.yearNumber = Number(year);
+
+  const plans = await prisma.pRNPlan.findMany({
+    where,
+    include: {
+      program: true,
+      rows: { include: { subject: true, professor: true } },
+    },
+    orderBy: [{ yearNumber: "asc" }],
+  });
+
+  res.json(plans);
+});
