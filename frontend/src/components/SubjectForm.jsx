@@ -25,11 +25,16 @@ export default function SubjectForm() {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  // inline edit (bez promjene programa u ovom koraku)
+  // inline edit (SADA uklj. i programe)
   const [editId, setEditId] = useState(null);
   const [eCode, setECode] = useState("");
   const [eName, setEName] = useState("");
   const [eEcts, setEEcts] = useState("");
+
+  // editor za programe u inline modu
+  const [ePrograms, setEPrograms] = useState([]); // [{programId, yearNumber}]
+  const [ePickerProgramId, setEPickerProgramId] = useState("");
+  const [ePickerYear, setEPickerYear] = useState(1);
 
   async function fetchList() {
     try {
@@ -58,7 +63,7 @@ export default function SubjectForm() {
     setPickerYear(1);
   }
 
-  // add one program to the draft list
+  // add one program to the draft list (ADD form)
   function addProgramToDraft() {
     if (!pickerProgramId) {
       setMsg({ type: "err", text: "Odaberi studijski program" });
@@ -102,16 +107,55 @@ export default function SubjectForm() {
     setECode(s.code || "");
     setEName(s.name || "");
     setEEcts(s.ects ?? "");
+
+    // mapiraj postojeca vezivanja u jednostavan oblik
+    const mapped = (s.subjectPrograms || []).map(sp => ({
+      programId: sp.programId,
+      yearNumber: Number(sp.yearNumber) || 1,
+    }));
+    setEPrograms(mapped);
+    setEPickerProgramId("");
+    setEPickerYear(1);
   }
-  function cancelEdit() { setEditId(null); }
+  function cancelEdit() {
+    setEditId(null);
+    setEPrograms([]);
+    setEPickerProgramId("");
+    setEPickerYear(1);
+  }
+
+  function eAddOrUpdateProgram() {
+    if (!ePickerProgramId) {
+      setMsg({ type: "err", text: "Odaberi studijski program" });
+      return;
+    }
+    const y = Number(ePickerYear) || 1;
+    setEPrograms(prev => {
+      const exists = prev.find(p => p.programId === ePickerProgramId);
+      if (exists) {
+        // update year ako vec postoji
+        return prev.map(p => p.programId === ePickerProgramId ? { ...p, yearNumber: y } : p);
+      }
+      return [...prev, { programId: ePickerProgramId, yearNumber: y }];
+    });
+  }
+  function eRemoveProgram(pid) {
+    setEPrograms(prev => prev.filter(p => p.programId !== pid));
+  }
+
   async function saveEdit(id) {
     try {
       const payload = {
         ...(eName.trim() ? { name: eName.trim() } : {}),
         ...(eCode.trim() ? { code: eCode.trim() } : { code: null }),
         ...(eEcts !== "" ? { ects: Number(eEcts) } : { ects: null }),
-        // NOTE: u ovom koraku ne ažuriramo programs (ostavljamo kasnije)
+        // SADA šaljemo i veze programa:
+        programs: ePrograms.map(p => ({ programId: p.programId, yearNumber: Number(p.yearNumber) || 1 })),
       };
+      if (!payload.programs || payload.programs.length === 0) {
+        setMsg({ type: "err", text: "Predmet mora imati bar jedan program" });
+        return;
+      }
       await apiPut(`/api/subjects/${id}`, payload);
       setEditId(null);
       fetchList();
@@ -171,6 +215,11 @@ export default function SubjectForm() {
     if (sortKey === key) setSortDir(d => d==="asc"?"desc":"asc");
     else { setSortKey(key); setSortDir("asc"); }
   }
+
+  const labelForProgram = (programId) => {
+    const pr = availablePrograms.find(ap => ap.id === programId);
+    return pr ? `${pr.code ? pr.code : pr.name}` : programId;
+  };
 
   return (
     <div>
@@ -247,11 +296,37 @@ export default function SubjectForm() {
                   <td><input className="input" value={eName} onChange={e=>setEName(e.target.value)} /></td>
                   <td><input className="input small" value={eEcts} onChange={e=>setEEcts(e.target.value)} inputMode="numeric" /></td>
                   <td>
-                    {(s.subjectPrograms || []).map(sp => (
-                      <div key={sp.programId}>
-                        {sp.program?.code || sp.program?.name || sp.programId} — {sp.yearNumber}. g.
-                      </div>
-                    ))}
+                    {/* editor za programe */}
+                    <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
+                      <select className="input" value={ePickerProgramId} onChange={e=>setEPickerProgramId(e.target.value)}>
+                        <option value="">— Program —</option>
+                        {availablePrograms.map(p => (
+                          <option key={p.id} value={p.id}>{p.code || p.name}</option>
+                        ))}
+                      </select>
+                      <input
+                        className="input small"
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={ePickerYear}
+                        onChange={e=>setEPickerYear(e.target.value)}
+                        style={{width:90}}
+                      />
+                      <button type="button" className="btn" onClick={eAddOrUpdateProgram}>Add/Update</button>
+                    </div>
+
+                    {ePrograms.length > 0 && (
+                      <ul style={{marginTop:6, display:"flex", gap:6, flexWrap:"wrap"}}>
+                        {ePrograms.map(p => (
+                          <li key={p.programId} style={{padding:"2px 8px", border:"1px solid #444", borderRadius:999}}>
+                            {labelForProgram(p.programId)} — {p.yearNumber}. g.
+                            {" "}
+                            <button type="button" className="btn" onClick={()=>eRemoveProgram(p.programId)}>×</button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </td>
                   <td style={{whiteSpace:"nowrap"}}>
                     <button className="btn" onClick={()=>saveEdit(s.id)}>Save</button>{" "}
@@ -267,7 +342,7 @@ export default function SubjectForm() {
                     {(s.subjectPrograms || []).length === 0 ? "-" :
                       (s.subjectPrograms || []).map(sp => (
                         <div key={sp.programId}>
-                          {sp.program?.code || sp.program?.name || sp.programId} — {sp.yearNumber}. g.
+                          {labelForProgram(sp.programId)} — {sp.yearNumber}. g.
                         </div>
                       ))
                     }

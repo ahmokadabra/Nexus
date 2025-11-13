@@ -8,7 +8,7 @@ export const router = Router();
 // Zod sheme
 const programRefSchema = z.object({
   programId: z.string().min(1),
-  yearNumber: z.number().int().min(1).max(10),
+  yearNumber: z.coerce.number().int().min(1).max(10), // <-- coerce
 });
 
 const createSchema = z.object({
