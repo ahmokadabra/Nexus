@@ -1,4 +1,3 @@
-// frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut } from "../lib/api";
 
@@ -13,7 +12,7 @@ const TITLE_MAP = {
 };
 const ENG_MAP = { EMPLOYED: "RO", EXTERNAL: "VS" };
 
-export default function  PlanRealizacije() {
+export default function PlanRealizacije() {
   const [programs, setPrograms] = useState([]);
   const [selectedProgramId, setSelectedProgramId] = useState("");
   const [year, setYear] = useState(1);
@@ -23,7 +22,6 @@ export default function  PlanRealizacije() {
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // load programs + professors
   useEffect(() => {
     (async () => {
       try {
@@ -66,7 +64,6 @@ export default function  PlanRealizacije() {
     }
   }
 
-  // load on selection change
   useEffect(() => {
     if (selectedProgramId) loadPlan(selectedProgramId, year);
   }, [selectedProgramId, year]);
@@ -82,7 +79,6 @@ export default function  PlanRealizacije() {
     }
   }
 
-  // 🔁 ručni sync redova iz predmeta
   async function syncRows(prune = false) {
     try {
       setMsg(null);
@@ -92,7 +88,7 @@ export default function  PlanRealizacije() {
         prune,
       });
       await loadPlan();
-      setMsg({ type: "ok", text: prune ? "Synch & prune gotovo" : "Redovi popunjeni iz predmeta" });
+      setMsg({ type: "ok", text: prune ? "Sync + čišćenje gotovo" : "Dodani redovi iz predmeta" });
     } catch (e) {
       setMsg({ type: "err", text: e.message });
     }
@@ -111,7 +107,7 @@ export default function  PlanRealizacije() {
     };
     changeRow(r.id, { saving: true });
     try {
-      const saved = await apiPost(`/api/planrealizacije/rows/${r.id}?_method=PUT`, body); // ili apiPut ako nemaš middleware za _method
+      const saved = await apiPut(`/api/planrealizacije/rows/${r.id}`, body);
       setMsg({ type: "ok", text: "Sačuvano" });
       setRows(arr =>
         arr.map(x =>
@@ -122,7 +118,7 @@ export default function  PlanRealizacije() {
                 lectureTotal:  saved.lectureTotal,
                 exerciseTotal: saved.exerciseTotal,
                 professor:     saved.professor ?? (body.professorId ? (profs.find(p => p.id === body.professorId) || null) : null),
-                _edit: { ...x._mod, saving: false },
+                _edit: { ...x._edit, saving: false },
               }
             : x
         )
@@ -133,7 +129,6 @@ export default function  PlanRealizacije() {
     }
   }
 
-  // totals
   const computed = useMemo(() => {
     const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
     rows.forEach(r => {
@@ -165,14 +160,12 @@ export default function  PlanRealizacije() {
               </button>
             ))}
           </div>
-          {/* novo: ručni sync */}
           <button className="btn" onClick={()=>syncRows(false)} disabled={!selectedProgramId || loading}>
             Popuni iz predmeta
           </button>
-          {/* ako želiš i brisati višak redova: */}
           {/* <button className="btn" onClick={()=>syncRows(true)} disabled={!selectedProgramId || loading}>
-               Sync + očisti višak
-             </button> */}
+            Sync + očisti višak
+          </button> */}
         </div>
       </div>
 
@@ -191,7 +184,7 @@ export default function  PlanRealizacije() {
 
       {loading ? (
         <div>Učitavanje…</div>
-      ) : !currentBoy ? ( // if you prefer, keep as currentProgram
+      ) : !currentProgram ? (
         <div>Nema programa. Pokreni seed iznad.</div>
       ) : !plan ? (
         <div>Nema podataka za prikaz.</div>
@@ -225,7 +218,8 @@ export default function  PlanRealizacije() {
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={11}>
-                    Nema redova za ovu godinu. Klikni <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
+                    Nema redova za ovu godinu. Klikni{" "}
+                    <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
                   </td>
                 </tr>
               ) : (
@@ -240,8 +234,7 @@ export default function  PlanRealizacije() {
                   const profId= r._edit?.professorId ?? r.professorId ?? "";
                   const prof  = profs.find(p=>p.id===profId) || r.professor || null;
                   const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-                  const title = prof?.title ? (TITLE_MAP[p
-                    .title] || p.title) : "";
+                  const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
 
                   return (
                     <tr key={r.id}>
@@ -282,7 +275,8 @@ export default function  PlanRealizacije() {
               {/* Totali */}
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
-                <td>{computed.total.RO.L}</td><td>{computed.total.VS ? computed.total.RO.E : computed.total.RO.E}</td>
+                <td>{computed.total.RO.L}</td>
+                <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
                 <td>{(computed.total.RO.L/15).toFixed(2)}</td>
                 <td>{(computed.total.RO.E/15).toFixed(2)}</td>
@@ -291,7 +285,8 @@ export default function  PlanRealizacije() {
               </tr>
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz honorarnog angažmana (VS):</td>
-                <td>{computed.total.VS.L}</td><td>{computed.total.VS.E}</td>
+                <td>{computed.total.VS.L}</td>
+                <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
                 <td>{(computed.total.VS.L/15).toFixed(2)}</td>
                 <td>{(computed.total.VS.E/15).toFixed(2)}</td>
@@ -300,7 +295,8 @@ export default function  PlanRealizacije() {
               </tr>
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
-                <td>{computed.total.ALL.L}</td><td>{computed.total.ALL.E}</td>
+                <td>{computed.total.ALL.L}</td>
+                <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
                 <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
                 <td>{(computed.total.ALL.E/15).toFixed(2)}</td>

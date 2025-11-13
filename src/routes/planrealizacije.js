@@ -1,4 +1,3 @@
-// src/routes/planrealizacije.js
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
@@ -10,7 +9,7 @@ const planQuerySchema = z.object({
   year: z.coerce.number().int().min(1).max(10),
 });
 
-// Header: mapiranje code -> naziv fakulteta
+// Header fakulteta po kodu programa
 const FACULTY_BY_CODE = {
   FIR: "Ekonomski fakultet",
   SMDP: "Ekonomski fakultet",
@@ -21,7 +20,7 @@ const FACULTY_BY_CODE = {
 
 router.get("/health", (_req, res) => res.json({ ok: true, scope: "planrealizacije" }));
 
-// Idempotent seed standardnih programa (po code)
+// Idempotent seed standardnih programa
 router.post("/seed-programs", async (_req, res) => {
   const data = [
     { code: "FIR", name: "Finansije i računovodstvo" },
@@ -51,38 +50,34 @@ router.get("/programs", async (_req, res) => {
   res.json(programs);
 });
 
-/** Helper: osiguraj (dodaj) redove u planu za sve predmete iz SubjectOnProgramYear. */
+/** Osiguraj redove u planu prema SubjectOnProgramYear (dodaj nedostajuće; opciono počisti višak). */
 async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) {
-  // 1) svi linkovi Predmet↔Program(Godina)
   const links = await prisma.subjectOnProgramYear.findMany({
     where: { programId, yearNumber },
     select: { subjectId: true },
   });
   const linkIds = new Set(links.map(l => l.subjectId));
 
-  // 2) postojeći redovi u planu
   const existing = await prisma.pRNRow.findMany({
     where: { planId },
     select: { subjectId: true },
   });
   const existingIds = new Set(existing.map(r => r.subjectId));
 
-  // 3) dodaj nedostajuće
-  const toCreate = [...linkIds].filter(id => !existingIds.contains ? !existingIds.has(id) : !existingIds[id]);
+  const toCreate = [...linkIds].filter(id => !existingIds.has(id));
   if (toCreate.length) {
     await prisma.pRNRow.createMany({
       data: toCreate.map(sid => ({
         planId,
         subjectId: sid,
-        // polja prema tvom modelu/FRONT-u:
-        lectureTotal: 0,
-        exerciseTotal: 0,
+        // polja iz tvoje sheme:
+        lectureHours: 0,
+        exerciseHours: 0,
       })),
-      skipDuplicates: true, // radi uz uniq(planId, subjectId)
+      skipDuplicates: true, // koristi ako imaš @@unique([planId, subjectId])
     });
   }
 
-  // 4) opcionalno obriši redove za predmete koji više nisu u tom program/godina (prune)
   if (prune) {
     await prisma.pRNRow.deleteMany({
       where: {
@@ -94,30 +89,27 @@ async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) 
 }
 
 // GET /api/planrealizacije/plan?programId=&year=
-// Kreira plan ako ne postoji, *uvijek* dosjeme nedostajuće redove iz SubjectOnProgramYear.
+// Kreira plan ako ne postoji, i SVAKE PUTA dosjeme nedostajuće redove.
 router.get("/plan", async (req, res) => {
   const parsed = planQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
   const { programId, year } = parsed.data;
 
   try {
-    const program = await prisma.studyProgram.findUnique({ id: programId });
+    const program = await prisma.studyProgram.findUnique({ where: { id: programId } });
     if (!program) return res.status(404).json({ message: "Program not found" });
 
-    // koristi ime kompozitnog ključa iz sheme: @@unique([programId, yearNumber], name: "uniq_plan_per_program_year")
     let plan = await prisma.pRNPlan.findUnique({
       where: { uniq_plan_per_program_year: { programId, yearNumber: year } },
     });
-
     if (!plan) {
       plan = await prisma.pRNPlan.create({ data: { programId, yearNumber: year } });
     }
 
-    // ensure rows (bez brisanja)
     await ensurePlanRows({ programId, yearNumber: year, planId: plan.id, prune: false });
 
     const full = await prisma.pRNPlan.findUnique({
-      id: plan.id,
+      where: { id: plan.id },
       include: {
         program: true,
         rows: {
@@ -131,9 +123,17 @@ router.get("/plan", async (req, res) => {
     });
 
     const facultyName = FACULTY_BY_CODE[full?.program?.code || ""] || "";
+
+    // mapiraj na nazive koje UI očekuje
+    const mappedRows = (full.rows || []).map(r => ({
+      ...r,
+      lectureTotal: r.lectureHours ?? 0,
+      exerciseTotal: r.exerciseHours ?? 0,
+    }));
+
     res.json({
       plan: { id: full.id, program: full.program, facultyName, yearNumber: full.yearNumber },
-      rows: full.rows,
+      rows: mappedRows,
     });
   } catch (e) {
     console.error(e);
@@ -141,7 +141,7 @@ router.get("/plan", async (req, res) => {
   }
 });
 
-// ručni sync: POST /api/planrealizacije/plan/seed-rows  { programId, year, prune?: boolean }
+// Ručni sync redova (opciono prune)
 router.post("/plan/seed-rows", async (req, res) => {
   const bodySchema = planQuerySchema.extend({ prune: z.boolean().optional() });
   const parsed = bodySchema.safeParse(req.body);
@@ -171,10 +171,16 @@ router.post("/plan/seed-rows", async (req, res) => {
       },
     });
 
+    const mappedRows = (full.rows || []).map(r => ({
+      ...r,
+      lectureTotal: r.lectureHours ?? 0,
+      exerciseTotal: r.exerciseHours ?? 0,
+    }));
+
     res.json({
       ok: true,
       plan: { id: full.id, program: full.program, yearNumber: full.yearNumber },
-      rows: full.rows,
+      rows: mappedRows,
     });
   } catch (e) {
     console.error(e);
@@ -182,7 +188,7 @@ router.post("/plan/seed-rows", async (req, res) => {
   }
 });
 
-// UPDATE reda (profesor / sati)
+// UPDATE jednog reda (profesor/sati)
 const rowUpdateSchema = z.object({
   professorId:  z.string().min(1).nullable().optional(),
   lectureTotal:  z.coerce.number().int().min(0).optional(),
@@ -194,22 +200,28 @@ router.put("/rows/:id", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
 
   try {
+    const data = {};
+    if (parsed.data.professorId !== undefined) data.professorId = parsed.data.professorId || null;
+    if (parsed.data.lectureTotal !== undefined) data.lectureHours = parsed.data.lectureTotal;
+    if (parsed.data.exerciseTotal !== undefined) data.exerciseHours = parsed.data.exerciseTotal;
+
     const updated = await prisma.pRNRow.update({
       where: { id: req.params.id },
-      data: {
-        ...(parsed.data.professorId  !== undefined ? { professorId:  parsed.data.professorId || null } : {}),
-        ...(parsed.data.lectureTotal  !== undefined ? { lectureTotal:  parsed.data.lectureTotal }  : {}),
-        ...(parsed.data.exerciseTotal !== undefined ? { exerciseTotal: parsed.data.exerciseTotal } : {}),
-      },
+      data,
       include: { subject: true, professor: true },
     });
-    res.json(updated);
+
+    res.json({
+      ...updated,
+      lectureTotal: updated.lectureHours ?? 0,
+      exerciseTotal: updated.exerciseHours ?? 0,
+    });
   } catch (e) {
     res.status(400).json({ message: "Cannot update", detail: String(e?.message || e) });
   }
 });
 
-// (opcija) lista planova
+// (opcionalno) lista planova
 router.get("/", async (req, res) => {
   const { programId, year } = req.query;
   const where = {};
