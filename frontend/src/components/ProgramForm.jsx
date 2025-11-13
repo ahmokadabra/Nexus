@@ -16,8 +16,9 @@ export default function ProgramForm() {
     setMsg(null);
     try {
       const data = await apiGet("/api/programs");
-      setPrograms(data);
+      setPrograms(Array.isArray(data) ? data : []);
     } catch (e) {
+      setPrograms([]);
       setMsg({ type: "error", text: e.message || "Failed to load programs." });
     } finally {
       setLoading(false);
@@ -80,7 +81,7 @@ export default function ProgramForm() {
                 value={selectedProgram}
                 onChange={e => setSelectedProgram(e.target.value)}>
           <option value="">-- select program --</option>
-          {programs.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {programs.map(p => <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>)}
         </select>
         <input className="input small" type="number" min={1}
                value={yearNumber} onChange={e => setYearNumber(e.target.value)} />
@@ -98,9 +99,16 @@ export default function ProgramForm() {
             <div key={p.id}
                  style={{ marginBottom: 12, padding: 12, border: "1px solid #eee", borderRadius: 8 }}>
               <strong>{p.name} {p.code ? `(${p.code})` : ""}</strong>
-              <div>Years: {(p.years || []).map(y =>
-                <span key={y.id} style={{ marginRight: 8 }}>Year {y.yearNumber}</span>
-              )}</div>
+              <div>
+                Years:&nbsp;
+                {(p.years || []).length
+                  ? p.years.map(y =>
+                      <span key={y.id} style={{ marginRight: 8 }}>
+                        Year {y.yearNumber}
+                      </span>
+                    )
+                  : <span style={{ opacity:.7 }}>—</span>}
+              </div>
             </div>
           ))}
         </div>
