@@ -7,7 +7,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL") // ⬅️ DODANO: koristi direktnu konekciju za migrate/generate
+  directUrl = env("DIRECT_URL") // koristi direktnu konekciju za migrate/generate
 }
 
 enum ProfessorTitle {
@@ -31,6 +31,12 @@ enum WeekType {
   B
 }
 
+// ⬇️ NOVO: semestar predmeta
+enum Semester {
+  ZIMSKI
+  LJETNI
+}
+
 model Professor {
   id         String          @id @default(cuid())
   name       String
@@ -43,7 +49,7 @@ model Professor {
 
   courses         Course[]
   scheduleEntries ScheduleEntry[]
-  prnRows         PRNRow[] // ⬅️ back-relation za PRNRow
+  prnRows         PRNRow[] // back-relation za PRNRow
 }
 
 model Subject {
@@ -55,8 +61,8 @@ model Subject {
   updatedAt DateTime @updatedAt
 
   courses         Course[]
-  subjectPrograms SubjectOnProgramYear[] // ⬅️ join sa programima
-  prnRows         PRNRow[] // ⬅️ back-relation za PRNRow
+  subjectPrograms SubjectOnProgramYear[] // join sa programima (po godini + semestru)
+  prnRows         PRNRow[]               // back-relation za PRNRow
 }
 
 model Room {
@@ -104,8 +110,8 @@ model StudyProgram {
   updatedAt DateTime @updatedAt
 
   years           ProgramYear[]
-  subjectPrograms SubjectOnProgramYear[] // ⬅️ join
-  prnPlans        PRNPlan[] // ⬅️ back-relation za PRNPlan
+  subjectPrograms SubjectOnProgramYear[] // join
+  prnPlans        PRNPlan[]              // back-relation za PRNPlan
 }
 
 model ProgramYear {
@@ -117,7 +123,7 @@ model ProgramYear {
   updatedAt  DateTime     @updatedAt
 }
 
-// Predmet ↔ StudyProgram uz godinu
+// Predmet ↔ StudyProgram uz godinu i semestar
 model SubjectOnProgramYear {
   id         String       @id @default(cuid())
   subject    Subject      @relation(fields: [subjectId], references: [id])
@@ -125,8 +131,13 @@ model SubjectOnProgramYear {
   program    StudyProgram @relation(fields: [programId], references: [id])
   programId  String
   yearNumber Int
+  semester   Semester     @default(ZIMSKI) // ⬅️ NOVO
 
-  @@unique([subjectId, programId], name: "uniq_subject_program")
+  // ⬇️ NOVO: jedinstveno po predmetu + programu + godini + semestru
+  @@unique([subjectId, programId, yearNumber, semester], name: "uniq_subject_program_year_sem")
+
+  // ⬇️ Opcionalno ubrzanje upita po programu/godini/sem
+  @@index([programId, yearNumber, semester], name: "idx_prog_year_sem")
 }
 
 model Course {
@@ -172,7 +183,7 @@ model PRNPlan {
   id         String       @id @default(cuid())
   program    StudyProgram @relation(fields: [programId], references: [id])
   programId  String
-  yearNumber Int // 1..4
+  yearNumber Int          // 1..4
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 

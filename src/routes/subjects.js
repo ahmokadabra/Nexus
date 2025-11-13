@@ -5,10 +5,13 @@ import { prisma } from "../prisma.js";
 
 export const router = Router();
 
+const semesterEnum = z.enum(["ZIMSKI", "LJETNI"]);
+
 // Zod sheme
 const programRefSchema = z.object({
   programId: z.string().min(1),
   yearNumber: z.coerce.number().int().min(1).max(10),
+  semester: semesterEnum, // <--- NOVO
 });
 
 const createSchema = z.object({
@@ -30,7 +33,6 @@ router.get("/", async (_req, res) => {
   const list = await prisma.subject.findMany({
     orderBy: [{ code: "asc" }, { name: "asc" }],
     include: {
-      // relation field iz modela Subject
       subjectPrograms: { include: { program: true } },
     },
   });
@@ -45,10 +47,13 @@ router.post("/", async (req, res) => {
   }
   const { name, code, ects, programs } = parsed.data;
 
-  // dedupe po programId (uzmi zadnji yearNumber ako se ponovi)
+  // dedupe po (programId, yearNumber, semester)
   const map = new Map();
-  for (const p of programs) map.set(p.programId, Number(p.yearNumber) || 1);
-  const cleanPrograms = Array.from(map, ([programId, yearNumber]) => ({ programId, yearNumber }));
+  for (const p of programs) {
+    const key = `${p.programId}:${p.yearNumber}:${p.semester}`;
+    map.set(key, { programId: p.programId, yearNumber: Number(p.yearNumber) || 1, semester: p.semester });
+  }
+  const cleanPrograms = Array.from(map.values());
 
   try {
     const created = await prisma.$transaction(async (tx) => {
@@ -60,12 +65,12 @@ router.post("/", async (req, res) => {
         },
       });
 
-      // **VAŽNO**: naziv modela je SubjectOnProgramYear -> client: subjectOnProgramYear
       await tx.subjectOnProgramYear.createMany({
         data: cleanPrograms.map((p) => ({
           subjectId: subj.id,
           programId: p.programId,
           yearNumber: p.yearNumber,
+          semester: p.semester,
         })),
         skipDuplicates: true,
       });
@@ -102,12 +107,14 @@ router.put("/:id", async (req, res) => {
   }
   const { name, code, ects, programs } = parsed.data;
 
-  // normalizuj eventualne duplikate u programs
   let cleanPrograms = null;
   if (programs) {
     const map = new Map();
-    for (const p of programs) map.set(p.programId, Number(p.yearNumber) || 1);
-    cleanPrograms = Array.from(map, ([programId, yearNumber]) => ({ programId, yearNumber }));
+    for (const p of programs) {
+      const key = `${p.programId}:${p.yearNumber}:${p.semester}`;
+      map.set(key, { programId: p.programId, yearNumber: Number(p.yearNumber) || 1, semester: p.semester });
+    }
+    cleanPrograms = Array.from(map.values());
   }
 
   try {
@@ -128,6 +135,7 @@ router.put("/:id", async (req, res) => {
             subjectId: subj.id,
             programId: p.programId,
             yearNumber: p.yearNumber,
+            semester: p.semester,
           })),
           skipDuplicates: true,
         });

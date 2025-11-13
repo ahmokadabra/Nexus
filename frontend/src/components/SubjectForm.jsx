@@ -2,6 +2,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut, apiDelete } from "../lib/api";
 
+const SEM_OPTS = [
+  { value: "ZIMSKI", label: "Zimski" },
+  { value: "LJETNI", label: "Ljetni" },
+];
+
 export default function SubjectForm() {
   // add form
   const [code, setCode] = useState("");
@@ -9,10 +14,11 @@ export default function SubjectForm() {
   const [ects, setEcts] = useState("");
 
   // program picker state (add form)
-  const [programs, setPrograms] = useState([]); // [{programId, yearNumber}]
+  const [programs, setPrograms] = useState([]); // [{programId, yearNumber, semester}]
   const [availablePrograms, setAvailablePrograms] = useState([]);
   const [pickerProgramId, setPickerProgramId] = useState("");
   const [pickerYear, setPickerYear] = useState(1);
+  const [pickerSemester, setPickerSemester] = useState("ZIMSKI");
 
   // list + UI
   const [list, setList] = useState([]);
@@ -25,16 +31,17 @@ export default function SubjectForm() {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  // inline edit (SADA uklj. i programe)
+  // inline edit
   const [editId, setEditId] = useState(null);
   const [eCode, setECode] = useState("");
   const [eName, setEName] = useState("");
   const [eEcts, setEEcts] = useState("");
 
   // editor za programe u inline modu
-  const [ePrograms, setEPrograms] = useState([]); // [{programId, yearNumber}]
+  const [ePrograms, setEPrograms] = useState([]); // [{programId, yearNumber, semester}]
   const [ePickerProgramId, setEPickerProgramId] = useState("");
   const [ePickerYear, setEPickerYear] = useState(1);
+  const [ePickerSemester, setEPickerSemester] = useState("ZIMSKI");
 
   async function fetchList() {
     try {
@@ -61,22 +68,26 @@ export default function SubjectForm() {
     setPrograms([]);
     setPickerProgramId("");
     setPickerYear(1);
+    setPickerSemester("ZIMSKI");
   }
 
-  // add one program to the draft list (ADD form)
+  // add one program to the draft list
   function addProgramToDraft() {
     if (!pickerProgramId) {
       setMsg({ type: "err", text: "Odaberi studijski program" });
       return;
     }
-    if (programs.some(p => p.programId === pickerProgramId)) {
-      setMsg({ type: "err", text: "Program je već dodat" });
+    const y = Number(pickerYear) || 1;
+    const sem = pickerSemester || "ZIMSKI";
+    const key = `${pickerProgramId}:${y}:${sem}`;
+    if (programs.some(p => `${p.programId}:${p.yearNumber}:${p.semester}` === key)) {
+      setMsg({ type: "err", text: "Veza Program+Godina+Semestar već postoji" });
       return;
     }
-    setPrograms(p => [...p, { programId: pickerProgramId, yearNumber: Number(pickerYear) || 1 }]);
+    setPrograms(p => [...p, { programId: pickerProgramId, yearNumber: y, semester: sem }]);
   }
-  function removeProgramFromDraft(pid) {
-    setPrograms(p => p.filter(x => x.programId !== pid));
+  function removeProgramFromDraft(pid, y, sem) {
+    setPrograms(p => p.filter(x => !(x.programId === pid && Number(x.yearNumber) === Number(y) && x.semester === sem)));
   }
 
   async function submit(e) {
@@ -91,7 +102,11 @@ export default function SubjectForm() {
         name: name.trim(),
         ...(code.trim() ? { code: code.trim() } : {}),
         ...(ects ? { ects: Number(ects) } : {}),
-        programs: programs.map(p => ({ programId: p.programId, yearNumber: Number(p.yearNumber) || 1 })),
+        programs: programs.map(p => ({
+          programId: p.programId,
+          yearNumber: Number(p.yearNumber) || 1,
+          semester: p.semester || "ZIMSKI",
+        })),
       };
       await apiPost("/api/subjects", payload);
       setMsg({ type: "ok", text: "Saved" });
@@ -107,21 +122,23 @@ export default function SubjectForm() {
     setECode(s.code || "");
     setEName(s.name || "");
     setEEcts(s.ects ?? "");
-
-    // mapiraj postojeca vezivanja u jednostavan oblik
+    // mapiraj postojeće veze (+ semester)
     const mapped = (s.subjectPrograms || []).map(sp => ({
       programId: sp.programId,
       yearNumber: Number(sp.yearNumber) || 1,
+      semester: sp.semester || "ZIMSKI",
     }));
     setEPrograms(mapped);
     setEPickerProgramId("");
     setEPickerYear(1);
+    setEPickerSemester("ZIMSKI");
   }
   function cancelEdit() {
     setEditId(null);
     setEPrograms([]);
     setEPickerProgramId("");
     setEPickerYear(1);
+    setEPickerSemester("ZIMSKI");
   }
 
   function eAddOrUpdateProgram() {
@@ -130,17 +147,16 @@ export default function SubjectForm() {
       return;
     }
     const y = Number(ePickerYear) || 1;
+    const sem = ePickerSemester || "ZIMSKI";
+    const key = `${ePickerProgramId}:${y}:${sem}`;
     setEPrograms(prev => {
-      const exists = prev.find(p => p.programId === ePickerProgramId);
-      if (exists) {
-        // update year ako vec postoji
-        return prev.map(p => p.programId === ePickerProgramId ? { ...p, yearNumber: y } : p);
-      }
-      return [...prev, { programId: ePickerProgramId, yearNumber: y }];
+      // ako već postoji tačno ista kombinacija — ne dupliraj
+      if (prev.some(p => `${p.programId}:${p.yearNumber}:${p.semester}` === key)) return prev;
+      return [...prev, { programId: ePickerProgramId, yearNumber: y, semester: sem }];
     });
   }
-  function eRemoveProgram(pid) {
-    setEPrograms(prev => prev.filter(p => p.programId !== pid));
+  function eRemoveProgram(pid, y, sem) {
+    setEPrograms(prev => prev.filter(p => !(p.programId === pid && Number(p.yearNumber) === Number(y) && p.semester === sem)));
   }
 
   async function saveEdit(id) {
@@ -149,8 +165,11 @@ export default function SubjectForm() {
         ...(eName.trim() ? { name: eName.trim() } : {}),
         ...(eCode.trim() ? { code: eCode.trim() } : { code: null }),
         ...(eEcts !== "" ? { ects: Number(eEcts) } : { ects: null }),
-        // SADA šaljemo i veze programa:
-        programs: ePrograms.map(p => ({ programId: p.programId, yearNumber: Number(p.yearNumber) || 1 })),
+        programs: ePrograms.map(p => ({
+          programId: p.programId,
+          yearNumber: Number(p.yearNumber) || 1,
+          semester: p.semester || "ZIMSKI",
+        })),
       };
       if (!payload.programs || payload.programs.length === 0) {
         setMsg({ type: "err", text: "Predmet mora imati bar jedan program" });
@@ -180,7 +199,7 @@ export default function SubjectForm() {
     if (!q) return list;
     return list.filter(s => {
       const programsBag = (s.subjectPrograms || [])
-        .map(sp => `${sp.program?.name || ""} ${sp.program?.code || ""} ${sp.yearNumber || ""}`)
+        .map(sp => `${sp.program?.name || ""} ${sp.program?.code || ""} ${sp.yearNumber || ""} ${sp.semester || ""}`)
         .join(" ")
         .toLowerCase();
       return (
@@ -221,6 +240,8 @@ export default function SubjectForm() {
     return pr ? `${pr.code ? pr.code : pr.name}` : programId;
   };
 
+  const semLabel = (sem) => sem === "LJETNI" ? "ljetni" : "zimski";
+
   return (
     <div>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
@@ -240,15 +261,18 @@ export default function SubjectForm() {
         </div>
 
         <div style={{marginTop:8, padding:8, border:"1px dashed #555", borderRadius:8}}>
-          <strong>Studijski programi (bar 1) + godina</strong>
-          <div className="form-row" style={{marginTop:8}}>
+          <strong>Studijski programi (bar 1) + godina + semestar</strong>
+          <div className="form-row" style={{marginTop:8, gap:8, alignItems:"center"}}>
             <select className="input" value={pickerProgramId} onChange={e=>setPickerProgramId(e.target.value)}>
               <option value="">— Odaberi program —</option>
               {availablePrograms.map(p => (
                 <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
               ))}
             </select>
-            <input className="input small" type="number" min={1} max={10} value={pickerYear} onChange={e=>setPickerYear(e.target.value)} />
+            <input className="input small" type="number" min={1} max={10} value={pickerYear} onChange={e=>setPickerYear(e.target.value)} style={{width:90}} />
+            <select className="input small" value={pickerSemester} onChange={e=>setPickerSemester(e.target.value)} style={{width:120}}>
+              {SEM_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
             <button type="button" className="btn" onClick={addProgramToDraft}>Add</button>
           </div>
 
@@ -256,11 +280,13 @@ export default function SubjectForm() {
             <ul style={{marginTop:8, display:"flex", gap:8, flexWrap:"wrap"}}>
               {programs.map(p => {
                 const pr = availablePrograms.find(ap => ap.id === p.programId);
-                const label = pr ? `${pr.name}${pr.code ? ` (${pr.code})` : ""} — ${p.yearNumber}. godina` : p.programId;
+                const label = pr
+                  ? `${pr.name}${pr.code ? ` (${pr.code})` : ""} — ${p.yearNumber}. godina — ${semLabel(p.semester)}`
+                  : p.programId;
                 return (
-                  <li key={p.programId} style={{padding:"4px 8px", border:"1px solid #444", borderRadius:999}}>
+                  <li key={`${p.programId}:${p.yearNumber}:${p.semester}`} style={{padding:"4px 8px", border:"1px solid #444", borderRadius:999}}>
                     {label}{" "}
-                    <button type="button" className="btn" onClick={()=>removeProgramFromDraft(p.programId)}>×</button>
+                    <button type="button" className="btn" onClick={()=>removeProgramFromDraft(p.programId, p.yearNumber, p.semester)}>×</button>
                   </li>
                 );
               })}
@@ -313,16 +339,19 @@ export default function SubjectForm() {
                         onChange={e=>setEPickerYear(e.target.value)}
                         style={{width:90}}
                       />
-                      <button type="button" className="btn" onClick={eAddOrUpdateProgram}>Add/Update</button>
+                      <select className="input small" value={ePickerSemester} onChange={e=>setEPickerSemester(e.target.value)} style={{width:120}}>
+                        {SEM_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                      <button type="button" className="btn" onClick={eAddOrUpdateProgram}>Add</button>
                     </div>
 
                     {ePrograms.length > 0 && (
                       <ul style={{marginTop:6, display:"flex", gap:6, flexWrap:"wrap"}}>
                         {ePrograms.map(p => (
-                          <li key={p.programId} style={{padding:"2px 8px", border:"1px solid #444", borderRadius:999}}>
-                            {labelForProgram(p.programId)} — {p.yearNumber}. g.
+                          <li key={`${p.programId}:${p.yearNumber}:${p.semester}`} style={{padding:"2px 8px", border:"1px solid #444", borderRadius:999}}>
+                            {labelForProgram(p.programId)} — {p.yearNumber}. g. — {semLabel(p.semester)}
                             {" "}
-                            <button type="button" className="btn" onClick={()=>eRemoveProgram(p.programId)}>×</button>
+                            <button type="button" className="btn" onClick={()=>eRemoveProgram(p.programId, p.yearNumber, p.semester)}>×</button>
                           </li>
                         ))}
                       </ul>
@@ -341,8 +370,8 @@ export default function SubjectForm() {
                   <td>
                     {(s.subjectPrograms || []).length === 0 ? "-" :
                       (s.subjectPrograms || []).map(sp => (
-                        <div key={sp.programId}>
-                          {labelForProgram(sp.programId)} — {sp.yearNumber}. g.
+                        <div key={`${sp.programId}:${sp.yearNumber}:${sp.semester || "ZIMSKI"}`}>
+                          {labelForProgram(sp.programId)} — {sp.yearNumber}. g. — {semLabel(sp.semester || "ZIMSKI")}
                         </div>
                       ))
                     }
