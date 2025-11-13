@@ -1,6 +1,7 @@
+// frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost, apiPut } from "../lib/api";
-import * as XLSX from "xlsx";
+import { apiGet, apiPut } from "../lib/api";
+import * as XLSX from "xlsx-js-style";
 
 const TITLE_MAP = {
   PRACTITIONER: "Stručnjak iz prakse",
@@ -11,7 +12,7 @@ const TITLE_MAP = {
   FULL_PROFESSOR: "Red. prof.",
   PROFESSOR_EMERITUS: "Prof. emeritus",
 };
-const ENG_MAP = { EMPLOYED: "RO", EXTERNAL: "VS" };
+const ENG_MAP = { EMPLOYED: "RO", EXTERNAL: "VS" }; // Radni odnos / Vanjski saradnik
 
 export default function PlanRealizacije() {
   const [programs, setPrograms] = useState([]);
@@ -23,6 +24,7 @@ export default function PlanRealizacije() {
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // učitaj programe + profesore
   useEffect(() => {
     (async () => {
       try {
@@ -39,6 +41,16 @@ export default function PlanRealizacije() {
     })();
   }, []);
 
+  // helper: izračunaj default "mode" (P | V | PV) po redu
+  function inferMode(r) {
+    const L = Number(r.lectureTotal ?? 0);
+    const E = Number(r.exerciseTotal ?? 0);
+    if (L > 0 && E > 0) return "PV";
+    if (L > 0) return "P";
+    if (E > 0) return "V";
+    return "PV";
+  }
+
   async function loadPlan(pid = selectedProgramId, yr = year) {
     setLoading(true);
     setMsg(null);
@@ -48,21 +60,16 @@ export default function PlanRealizacije() {
       );
       setPlan(data.plan);
       setRows(
-        (data.rows || []).map((r) => {
-          const L = r.lectureTotal ?? 0;
-          const E = r.exerciseTotal ?? 0;
-          const kind = L >= E ? "P" : "V";
-          return {
-            ...r,
-            _edit: {
-              professorId: r.professorId || "",
-              lectureTotal: L,
-              exerciseTotal: E,
-              kind, // "P" ili "V"
-              saving: false,
-            },
-          };
-        })
+        (data.rows || []).map((r) => ({
+          ...r,
+          _edit: {
+            professorId: r.professorId || "",
+            lectureTotal: r.lectureTotal ?? 0,
+            exerciseTotal: r.exerciseTotal ?? 0,
+            mode: inferMode(r), // "P" | "V" | "PV"
+            saving: false,
+          },
+        }))
       );
     } catch (e) {
       setPlan(null);
@@ -77,17 +84,6 @@ export default function PlanRealizacije() {
     if (selectedProgramId) loadPlan(selectedProgramId, year);
   }, [selectedProgramId, year]);
 
-  async function seedPrograms() {
-    try {
-      setMsg(null);
-      const res = await apiPost("/api/planrealizacije/seed-programs", {});
-      setPrograms(res.programs || []);
-      if (res.programs?.length) setSelectedProgramId(res.programs[0].id);
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
-    }
-  }
-
   function changeRow(id, patch) {
     setRows((arr) =>
       arr.map((r) => (r.id === id ? { ...r, _edit: { ...r._edit, ...patch } } : r))
@@ -96,10 +92,14 @@ export default function PlanRealizacije() {
 
   async function saveRow(r) {
     if (!r?._edit) return;
+    // Ako je izabrano "P", total za vježbe = 0; Ako "V", total za predavanja = 0
+    const mode = r._edit.mode || "PV";
     const body = {
       professorId: r._edit.professorId === "" ? null : String(r._edit.professorId),
-      lectureTotal: Number(r._edit.lectureTotal) || 0,
-      exerciseTotal: Number(r._edit.exerciseTotal) || 0,
+      lectureTotal:
+        mode === "V" ? 0 : Number(r._edit.lectureTotal) || 0,
+      exerciseTotal:
+        mode === "P" ? 0 : Number(r._edit.exerciseTotal) || 0,
     };
     changeRow(r.id, { saving: true });
     try {
@@ -116,7 +116,13 @@ export default function PlanRealizacije() {
                 professor:
                   saved.professor ??
                   (body.professorId ? profs.find((p) => p.id === body.professorId) || null : null),
-                _edit: { ...x._edit, saving: false },
+                _edit: {
+                  ...x._edit,
+                  lectureTotal: saved.lectureTotal,
+                  exerciseTotal: saved.exerciseTotal,
+                  mode: inferMode(saved),
+                  saving: false,
+                },
               }
             : x
         )
@@ -127,57 +133,7 @@ export default function PlanRealizacije() {
     }
   }
 
-  async function addTeacher(subjectId) {
-    if (!plan?.id) return;
-    try {
-      setMsg(null);
-      const newRow = await apiPost("/api/planrealizacije/rows", {
-        planId: plan.id,
-        subjectId,
-      });
-      const prepared = {
-        ...newRow,
-        _edit: {
-          professorId: newRow.professorId || "",
-          lectureTotal: newRow.lectureTotal ?? 0,
-          exerciseTotal: newRow.exerciseTotal ?? 0,
-          kind: "P",
-          saving: false,
-        },
-      };
-      setRows((prev) => {
-        const idxs = [];
-        prev.forEach((x, i) => {
-          if (x.subjectId === subjectId) idxs.push(i);
-        });
-        const insertAt = idxs.length ? idxs[idxs.length - 1] + 1 : prev.length;
-        const next = [...prev];
-        next.splice(insertAt, 0, prepared);
-        return next;
-      });
-      setMsg({ type: "ok", text: "Dodat nastavnik za ovaj predmet" });
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
-    }
-  }
-
-  const groups = useMemo(() => {
-    const order = [];
-    const map = new Map();
-    rows.forEach((r) => {
-      if (!map.has(r.subjectId)) {
-        map.set(r.subjectId, []);
-        order.push(r.subjectId);
-      }
-      map.get(r.subjectId).push(r);
-    });
-    return order.map((sid) => ({
-      subjectId: sid,
-      subject: map.get(sid)?.[0]?.subject,
-      rows: map.get(sid),
-    }));
-  }, [rows]);
-
+  // proračuni (za dno tabele)
   const computed = useMemo(() => {
     const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
     rows.forEach((r) => {
@@ -194,132 +150,342 @@ export default function PlanRealizacije() {
         total.VS.E += E;
       }
     });
-    const sum = (o) => o.L + o.E;
+    const sum = (obj) => obj.L + obj.E;
     const sumALL = sum(total.ALL);
     const sumRO = sum(total.RO);
     const sumVS = sum(total.VS);
-    let pRO = 0,
-      pVS = 0;
-    if (sumALL > 0) {
-      pRO = Math.round((sumRO * 10000) / sumALL) / 100;
-      pVS = Math.round((sumVS * 10000) / sumALL) / 100;
-      const fix = Math.round((100 - (pRO + pVS)) * 100) / 100;
-      pVS = Math.round((pVS + fix) * 100) / 100;
-    }
-    return { total, sumALL, sumRO, sumVS, pRO, pVS };
+    const pct = (x) => (sumALL > 0 ? (x / sumALL) * 100 : 0);
+    return {
+      total,
+      sumALL,
+      sumRO,
+      sumVS,
+      pctRO: pct(sumRO),
+      pctVS: pct(sumVS),
+    };
+  }, [rows]);
+
+  // grupiranje po predmetu (za spajanje ćelija u UI i za Excel)
+  const grouped = useMemo(() => {
+    const map = new Map();
+    rows.forEach((r) => {
+      const key = r.subject?.id || r.id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return Array.from(map.values());
   }, [rows]);
 
   const currentProgram = programs.find((p) => p.id === selectedProgramId);
 
-  // ======= EXPORT XLSX =======
-  function exportXLSX() {
-    if (!plan) return;
+  // ===== Excel export (xlsx-js-style) =====
+  function toCell(v, style = {}, tHint) {
+    const isNum = typeof v === "number";
+    return {
+      v,
+      t: tHint || (isNum ? "n" : "s"),
+      s: style,
+    };
+  }
 
-    // AOA data
-    const aoa = [
-      ["Predmet", "Šifra", "Tip (P/V)", "Nastavnik", "Angažman (RO/VS)", "Predavanja", "Vježbe", "Ukupno", "Sedmično P", "Sedmično V", "Sedmično ∑"],
+  function downloadExcel() {
+    const wb = XLSX.utils.book_new();
+
+    // Stilovi
+    const BORDER = { style: "thin", color: { rgb: "FF444444" } };
+    const BORDERS = { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER };
+
+    const sTitle = {
+      font: { bold: true, sz: 14, color: { rgb: "FFFFFFFF" } },
+      fill: { fgColor: { rgb: "FF1F2937" } },
+      alignment: { horizontal: "left", vertical: "center" },
+    };
+    const sSub = {
+      font: { bold: false, sz: 11 },
+      alignment: { horizontal: "left", vertical: "center" },
+    };
+    const sTH = {
+      font: { bold: true, color: { rgb: "FFFFFFFF" } },
+      fill: { fgColor: { rgb: "FF374151" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: BORDERS,
+    };
+    const sTH2 = {
+      font: { bold: true, color: { rgb: "FFFFFFFF" } },
+      fill: { fgColor: { rgb: "FF4B5563" } },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: BORDERS,
+    };
+    const sTD = {
+      alignment: { vertical: "center" },
+      border: BORDERS,
+    };
+    const sTDLeft = {
+      alignment: { horizontal: "left", vertical: "center", wrapText: true },
+      border: BORDERS,
+    };
+    const sTDCenter = {
+      alignment: { horizontal: "center", vertical: "center" },
+      border: BORDERS,
+    };
+    const sTDNum = {
+      alignment: { horizontal: "right", vertical: "center" },
+      border: BORDERS,
+      numFmt: "0.00",
+    };
+    const sTDInt = {
+      alignment: { horizontal: "right", vertical: "center" },
+      border: BORDERS,
+      numFmt: "0",
+    };
+    const sTotal = {
+      font: { bold: true },
+      border: BORDERS,
+      alignment: { horizontal: "right", vertical: "center" },
+      fill: { fgColor: { rgb: "FFF3F4F6" } },
+    };
+    const sTotalLabel = {
+      font: { bold: true },
+      alignment: { horizontal: "right", vertical: "center" },
+      fill: { fgColor: { rgb: "FFF3F4F6" } },
+      border: BORDERS,
+    };
+    const sTotalPctLabel = {
+      font: { bold: true },
+      alignment: { horizontal: "right", vertical: "center" },
+      fill: { fgColor: { rgb: "FFE5E7EB" } },
+      border: BORDERS,
+    };
+    const sTotalPctVal = {
+      font: { bold: true },
+      alignment: { horizontal: "left", vertical: "center" },
+      fill: { fgColor: { rgb: "FFE5E7EB" } },
+      border: BORDERS,
+      numFmt: "0.00\\%",
+    };
+
+    // Kolone (10 kolona bez "Save" dugmeta)
+    // A: Predmet, B: P/V, C: Nastavnici, D: Angažman,
+    // E: L (uk), F: V (uk), G: Ukupno,
+    // H: L/15, I: V/15, J: Uk/15
+    const cols = [
+      { wch: 40 }, // Predmet
+      { wch: 6 },  // P/V
+      { wch: 28 }, // Nastavnici
+      { wch: 10 }, // Angažman
+      { wch: 12 }, // L total
+      { wch: 12 }, // E total
+      { wch: 12 }, // U total
+      { wch: 12 }, // L/15
+      { wch: 12 }, // E/15
+      { wch: 12 }, // U/15
     ];
 
-    const merges = []; // merge Subject kolone po grupama (col 0)
+    const data = [];
+    const merges = [];
 
-    let excelRow = 1; // nakon headera
-    groups.forEach((g) => {
-      g.rows.forEach((r, idx) => {
-        const subj = g.subject || {};
+    // Header (title + sub)
+    const title = `Plan realizacije nastave`;
+    const faculty = plan?.facultyName || "";
+    const line3 = `${currentProgram?.name || ""}${currentProgram?.code ? ` (${currentProgram.code})` : ""} — Godina ${plan?.yearNumber || year}`;
+    // push tri reda (merge preko svih 10 kolona)
+    data.push([toCell(title, sTitle)]);
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 9 } });
+    data.push([toCell(faculty, sSub)]);
+    merges.push({ s: { r: 1, c: 0 }, e: { r: 1, c: 9 } });
+    data.push([toCell(line3, sSub)]);
+    merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: 9 } });
+
+    // prazno
+    data.push([toCell("")]);
+
+    const headerStart = data.length;
+
+    // Prvi red headera (sa grupama)
+    const h1 = [
+      toCell("Predmet", sTH),
+      toCell("P/V", sTH),
+      toCell("Nastavnici", sTH),
+      toCell("Angažman", sTH),
+      toCell("Pokrivenost ukupno", sTH), // E-G merge
+      toCell("", sTH),
+      toCell("", sTH),
+      toCell("Pokrivenost sedmična", sTH), // H-J merge
+      toCell("", sTH),
+      toCell("", sTH),
+    ];
+    data.push(h1);
+    merges.push({ s: { r: headerStart, c: 4 }, e: { r: headerStart, c: 6 } });
+    merges.push({ s: { r: headerStart, c: 7 }, e: { r: headerStart, c: 9 } });
+
+    // Drugi red headera (kolone)
+    const h2 = [
+      toCell("", sTH2),
+      toCell("", sTH2),
+      toCell("", sTH2),
+      toCell("", sTH2),
+      toCell("Predavanja", sTH2),
+      toCell("Vježbe", sTH2),
+      toCell("Ukupno", sTH2),
+      toCell("Predavanja", sTH2),
+      toCell("Vježbe", sTH2),
+      toCell("Ukupno", sTH2),
+    ];
+    data.push(h2);
+    // Merge za prva 4 header polja (da izgledaju kao jedna visina)
+    merges.push({ s: { r: headerStart, c: 0 }, e: { r: headerStart + 1, c: 0 } });
+    merges.push({ s: { r: headerStart, c: 1 }, e: { r: headerStart + 1, c: 1 } });
+    merges.push({ s: { r: headerStart, c: 2 }, e: { r: headerStart + 1, c: 2 } });
+    merges.push({ s: { r: headerStart, c: 3 }, e: { r: headerStart + 1, c: 3 } });
+
+    // Tabela redovi
+    const startBody = data.length;
+
+    // treba merge subject ćelija za grupisane redove
+    grouped.forEach((group) => {
+      const firstRowIndex = data.length;
+      group.forEach((r, idx) => {
         const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
         const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
         const U = L + E;
         const Lw = (L / 15) || 0;
         const Ew = (E / 15) || 0;
         const Uw = (U / 15) || 0;
-        const profId = r._edit?.professorId ?? r.professorId ?? "";
-        const prof = profs.find((p) => p.id === profId) || r.professor || null;
+        const subj = r.subject || {};
+        const prof = r.professor || profs.find((p) => p.id === (r._edit?.professorId || r.professorId)) || null;
         const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-        const kind = r._edit?.kind || "P";
+        const mode = r._edit?.mode || inferMode(r);
 
-        aoa.push([
-          idx === 0 ? subj.name : "", // samo prvi red grupe puni naziv (radi merge-a)
-          subj.code || "",
-          kind,
-          prof?.name || "",
-          anga,
-          L,
-          E,
-          U,
-          Lw.toFixed(2),
-          Ew.toFixed(2),
-          Uw.toFixed(2),
+        data.push([
+          toCell(
+            idx === 0
+              ? `${subj.name || ""}${subj.code ? ` (${subj.code})` : ""}${subj.ects ? ` — ECTS: ${subj.ects}` : ""}`
+              : "",
+            sTDLeft
+          ),
+          toCell(mode, sTDCenter),
+          toCell(
+            prof
+              ? `${prof.name}${prof.title ? ` — ${TITLE_MAP[prof.title] || prof.title}` : ""}`
+              : "—",
+            sTDLeft
+          ),
+          toCell(anga, sTDCenter),
+          toCell(L, sTDInt, "n"),
+          toCell(E, sTDInt, "n"),
+          toCell(U, sTDInt, "n"),
+          toCell(Lw, sTDNum, "n"),
+          toCell(Ew, sTDNum, "n"),
+          toCell(Uw, sTDNum, "n"),
         ]);
-        excelRow++;
       });
-
-      if (g.rows.length > 1) {
-        // spoji Subject kolonu (A) od prvog do zadnjeg reda grupe
-        const startR = excelRow - g.rows.length; // top ćelija grupe
-        const endR = excelRow - 1; // bottom ćelija grupe
-        merges.push({ s: { r: startR, c: 0 }, e: { r: endR, c: 0 } });
+      // merge subject kolone A kroz broj redova u grupi
+      if (group.length > 1) {
+        const lastRowIndex = data.length - 1;
+        const offset = 0; // kolona A
+        merges.push({
+          s: { r: firstRowIndex, c: offset },
+          e: { r: lastRowIndex, c: offset },
+        });
       }
     });
 
-    // prazna linija, pa summary
-    aoa.push([]);
-    aoa.push(["Ukupno RO", "", "", "", "", computed.total.RO.L, computed.total.RO.E, computed.sumRO, "", "", ""]);
-    aoa.push(["Udio RO (%)", "", "", "", "", "", "", `${computed.pRO.toFixed(2)}%`, "", "", ""]);
-    aoa.push(["Ukupno VS", "", "", "", "", computed.total.VS.L, computed.total.VS.E, computed.sumVS, "", "", ""]);
-    aoa.push(["Udio VS (%)", "", "", "", "", "", "", `${computed.pVS.toFixed(2)}%`, "", "", ""]);
-    aoa.push(["Ukupno", "", "", "", "", computed.total.ALL.L, computed.total.ALL.E, computed.sumALL, "", "", ""]);
-    aoa.push(["Udio ukupno", "", "", "", "", "", "", "100.00%", "", "", ""]);
+    // Totali (tri reda, svaki sa brojevima i desno udjelima)
+    const { total, sumALL, sumRO, sumVS, pctRO, pctVS } = computed;
 
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    data.push([
+      toCell("Ukupno iz radnog odnosa (RO):", sTotalLabel),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell(total.RO.L, sTotal, "n"),
+      toCell(total.RO.E, sTotal, "n"),
+      toCell(sumRO, sTotal, "n"),
+      toCell(total.RO.L / 15, sTotal, "n"),
+      toCell(total.RO.E / 15, sTotal, "n"),
+      toCell(sumRO / 15, sTotal, "n"),
+    ]);
+    // desno – Udio RO
+    // ubacit ćemo dodatnu ćeliju iza J da prikažemo "Udio RO: xx.xx%"
+    data[data.length - 1].push(toCell("Udio RO:", sTotalPctLabel), toCell(pctRO / 100, sTotalPctVal, "n"));
+    // merge label u A-D
+    merges.push({ s: { r: data.length - 1, c: 0 }, e: { r: data.length - 1, c: 3 } });
+
+    data.push([
+      toCell("Ukupno iz honorarnog angažmana (VS):", sTotalLabel),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell(total.VS.L, sTotal, "n"),
+      toCell(total.VS.E, sTotal, "n"),
+      toCell(sumVS, sTotal, "n"),
+      toCell(total.VS.L / 15, sTotal, "n"),
+      toCell(total.VS.E / 15, sTotal, "n"),
+      toCell(sumVS / 15, sTotal, "n"),
+    ]);
+    data[data.length - 1].push(toCell("Udio VS:", sTotalPctLabel), toCell(pctVS / 100, sTotalPctVal, "n"));
+    merges.push({ s: { r: data.length - 1, c: 0 }, e: { r: data.length - 1, c: 3 } });
+
+    data.push([
+      toCell("Ukupno:", sTotalLabel),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell("", sTotal),
+      toCell(total.ALL.L, sTotal, "n"),
+      toCell(total.ALL.E, sTotal, "n"),
+      toCell(sumALL, sTotal, "n"),
+      toCell(total.ALL.L / 15, sTotal, "n"),
+      toCell(total.ALL.E / 15, sTotal, "n"),
+      toCell(sumALL / 15, sTotal, "n"),
+    ]);
+    data[data.length - 1].push(toCell("Ukupno:", sTotalPctLabel), toCell(1, sTotalPctVal, "n")); // 100%
+    merges.push({ s: { r: data.length - 1, c: 0 }, e: { r: data.length - 1, c: 3 } });
+
+    // Pretvori u sheet
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws["!cols"] = [...cols, { wch: 12 }, { wch: 10 }]; // dvije dodatne za "Udio"
     ws["!merges"] = merges;
-    ws["!cols"] = [
-      { wch: 36 }, // Predmet
-      { wch: 10 }, // Šifra
-      { wch: 7 },  // Tip
-      { wch: 26 }, // Nastavnik
-      { wch: 10 }, // Angažman
-      { wch: 12 }, // P
-      { wch: 12 }, // V
-      { wch: 12 }, // ∑
-      { wch: 12 }, // P/7
-      { wch: 12 }, // V/7
-      { wch: 12 }, // ∑/7
-    ];
 
-    const wb = XLSX.utils.book_new();
-    const sheetName = `${(currentProgram?.code || "Program")}-god${year}`;
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-    const fileBase = (currentProgram?.code || currentProgram?.name || "program").replace(/\s+/g, "_");
-    XLSX.writeFile(wb, `plan_realizacije_${fileBase}_god${year}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "PRN");
+    const fname = `PRN_${currentProgram?.code || currentProgram?.name || "Program"}_G${plan?.yearNumber || year}.xlsx`;
+    XLSX.writeFile(wb, fname);
   }
 
+  // ===== RENDER =====
   return (
     <div>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
         <h2>Plan realizacije nastave</h2>
         <div style={{display:"flex", gap:8, alignItems:"center"}}>
-          {programs.length === 0 ? (
-            <button className="btn" onClick={seedPrograms}>Dodaj standardne studijske programe</button>
-          ) : null}
           <div style={{display:"flex", gap:6}}>
             {[1,2,3,4].map(y => (
-              <button key={y} className="btn" style={{opacity: year===y?1:0.7}} onClick={()=>setYear(y)}>
+              <button
+                key={y}
+                className="btn"
+                style={{opacity: year===y?1:0.7}}
+                onClick={()=>setYear(y)}
+              >
                 Godina {y}
               </button>
             ))}
           </div>
-          <button className="btn" onClick={()=>loadPlan()} disabled={!selectedProgramId || loading}>
-            Refresh
-          </button>
+          <button className="btn" onClick={downloadExcel} disabled={!rows.length}>Download Excel</button>
         </div>
       </div>
 
       {/* Tabs programi */}
       <div style={{display:"flex", gap:8, flexWrap:"wrap", margin:"8px 0"}}>
         {programs.map(p => (
-          <button key={p.id} className="btn"
-            style={{ background: selectedProgramId===p.id ? "#2a2f3a" : "transparent", border: "1px solid #3a4152" }}
-            onClick={()=>setSelectedProgramId(p.id)} title={p.name}>
+          <button
+            key={p.id}
+            className="btn"
+            style={{
+              background: selectedProgramId===p.id ? "#2a2f3a" : "transparent",
+              border: "1px solid #3a4152"
+            }}
+            onClick={()=>setSelectedProgramId(p.id)}
+            title={p.name}
+          >
             {p.code || p.name}
           </button>
         ))}
@@ -330,7 +496,7 @@ export default function PlanRealizacije() {
       {loading ? (
         <div>Učitavanje…</div>
       ) : !currentProgram ? (
-        <div>Nema programa. Pokreni seed iznad.</div>
+        <div>Nema programa.</div>
       ) : !plan ? (
         <div>Nema podataka za prikaz.</div>
       ) : (
@@ -346,7 +512,7 @@ export default function PlanRealizacije() {
             <thead>
               <tr>
                 <th>Predmet</th>
-                <th>P/V</th>
+                <th style={{width:70}}>P/V</th>
                 <th>Nastavnici</th>
                 <th>Angažman</th>
                 <th colSpan={3}>Pokrivenost ukupno</th>
@@ -354,57 +520,74 @@ export default function PlanRealizacije() {
                 <th></th>
               </tr>
               <tr>
-                <th></th><th></th><th></th><th></th>
-                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
-                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
                 <th></th>
               </tr>
             </thead>
+
             <tbody>
-              {groups.length === 0 ? (
+              {grouped.length === 0 ? (
                 <tr>
-                  <td colSpan={11}>
-                    Nema redova za ovu godinu. Dodaj predmete u bazi i poveži program/godinu, pa klikni <button className="btn" onClick={()=>loadPlan()}>Refresh</button>.
-                  </td>
+                  <td colSpan={11}>Nema redova</td>
                 </tr>
-              ) : groups.flatMap((g) =>
-                  g.rows.map((r, idx) => {
+              ) : (
+                grouped.map((group, gi) => {
+                  const subjectName =
+                    group[0]?.subject?.name || "";
+                  const subjectCode =
+                    group[0]?.subject?.code ? ` (${group[0].subject.code})` : "";
+                  const subjECTS =
+                    group[0]?.subject?.ects != null ? ` — ECTS: ${group[0].subject.ects}` : "";
+
+                  return group.map((r, idx) => {
                     const L  = Number(r._edit?.lectureTotal  ?? r.lectureTotal  ?? 0);
                     const E  = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
                     const U  = L + E;
-                    const Lw = (L/15) || 0, Ew = (E/15) || 0, Uw = (U/15) || 0;
-                    const subj  = g.subject || {};
-                    const ects  = subj.ects ?? "";
-                    const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
-                    const profId= r._edit?.professorId ?? r.professorId ?? "";
-                    const prof  = profs.find(p=>p.id===profId) || r.professor || null;
-                    const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-                    const kind  = r._edit?.kind || "P";
+                    const Lw = (L/15) || 0;
+                    const Ew = (E/15) || 0;
+                    const Uw = (U/15) || 0;
+                    const profId = r._edit?.professorId ?? r.professorId ?? "";
+                    const prof   = profs.find(p=>p.id===profId) || r.professor || null;
+                    const anga   = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+                    const mode   = r._edit?.mode || "PV";
 
                     return (
-                      <tr key={r.id}>
-                        {idx === 0 && (
-                          <td rowSpan={g.rows.length}>
-                            <div style={{fontWeight:600}}>{subj.name}</div>
-                            <div style={{fontSize:12, opacity:0.8}}>
-                              {subj.code ? `(${subj.code}) ` : ""}ECTS: {ects === "" ? "-" : ects}
-                              {joint ? " • Zajednički predmet" : ""}
-                            </div>
-                          </td>
-                        )}
+                      <tr key={`${r.id}-${idx}`}>
+                        {/* subject cell merged vizuelno: prvi red prikazuje, ostali prazni */}
+                        <td rowSpan={idx===0 ? group.length : 1} style={{display: idx===0 ? undefined : "none"}}>
+                          <div style={{fontWeight:600}}>{subjectName}{subjectCode}{subjECTS}</div>
+                        </td>
+
+                        {/* P/V select (usko) */}
                         <td>
                           <select
-                            className="input small"
-                            value={kind}
-                            onChange={(e)=>changeRow(r.id,{ kind: e.target.value })}
-                            style={{ width: 48, padding: "2px 6px" }}
+                            className="input"
+                            value={mode}
+                            onChange={(e)=>changeRow(r.id,{ mode: e.target.value })}
+                            style={{maxWidth:68}}
                           >
                             <option value="P">P</option>
                             <option value="V">V</option>
+                            <option value="PV">P/V</option>
                           </select>
                         </td>
+
+                        {/* profesor */}
                         <td style={{minWidth:220}}>
-                          <select className="input" value={String(profId)} onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}>
+                          <select
+                            className="input"
+                            value={String(profId)}
+                            onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}
+                          >
                             <option value="">— odaberi —</option>
                             {profs.map(p=>(
                               <option key={p.id} value={p.id}>
@@ -413,108 +596,113 @@ export default function PlanRealizacije() {
                             ))}
                           </select>
                         </td>
+
                         <td>{anga}</td>
+
+                        {/* Predavanja */}
                         <td>
                           <input
                             className="input small"
-                            value={L}
+                            value={mode==="V" ? 0 : (r._edit?.lectureTotal ?? r.lectureTotal ?? 0)}
                             onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })}
                             inputMode="numeric"
-                            style={{maxWidth:90, opacity: kind==="P" ? 1 : 0.6}}
-                            disabled={kind !== "P"}
+                            style={{maxWidth:90, opacity: mode==="V" ? 0.5 : 1}}
+                            disabled={mode==="V"}
                           />
                         </td>
+
+                        {/* Vježbe */}
                         <td>
                           <input
                             className="input small"
-                            value={E}
+                            value={mode==="P" ? 0 : (r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0)}
                             onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })}
                             inputMode="numeric"
-                            style={{maxWidth:90, opacity: kind==="V" ? 1 : 0.6}}
-                            disabled={kind !== "V"}
+                            style={{maxWidth:90, opacity: mode==="P" ? 0.5 : 1}}
+                            disabled={mode==="P"}
                           />
                         </td>
+
                         <td>{U}</td>
                         <td>{Lw.toFixed(2)}</td>
                         <td>{Ew.toFixed(2)}</td>
                         <td>{Uw.toFixed(2)}</td>
-                        <td style={{whiteSpace:"nowrap", display:"flex", gap:6}}>
-                          <button className="btn" onClick={()=>saveRow(r)} disabled={r._edit?.saving}>
+
+                        <td style={{whiteSpace:"nowrap"}}>
+                          <button className="btn" disabled={r._edit?.saving} onClick={()=>saveRow(r)}>
                             {r._edit?.saving ? "..." : "Save"}
                           </button>
-                          {idx === 0 && (
-                            <button className="btn" title="Dodaj nastavnika za ovaj predmet" onClick={()=>addTeacher(g.subjectId)}>
-                              Dodaj nastavnika
-                            </button>
-                          )}
                         </td>
                       </tr>
                     );
-                  })
-                )
-              }
+                  });
+                })
+              )}
 
-              {/* Footer: RO/VS + Ukupno u istom redu s udjelima */}
+              {/* Totali */}
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>
+                  Ukupno iz radnog odnosa (RO):
+                </td>
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td colSpan={2} style={{textAlign:"right", fontWeight:600}}>Udio RO (%):</td>
-                <td>{computed.pRO.toFixed(2)}%</td>
-                <td></td>
+                <td>{(computed.total.RO.L/15).toFixed(2)}</td>
+                <td>{(computed.total.RO.E/15).toFixed(2)}</td>
+                <td>{(computed.sumRO/15).toFixed(2)}</td>
+
+                {/* Udio RO desno, u istom redu */}
+                <td>
+                  <div style={{display:"flex", gap:8}}>
+                    <span style={{opacity:.8}}>Udio RO:</span>
+                    <strong>{computed.pctRO.toFixed(2)}%</strong>
+                  </div>
+                </td>
               </tr>
+
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz honorarnog angažmana (VS):</td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>
+                  Ukupno iz honorarnog angažmana (VS):
+                </td>
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td colSpan={2} style={{textAlign:"right", fontWeight:600}}>Udio VS (%):</td>
-                <td>{computed.pVS.toFixed(2)}%</td>
-                <td></td>
+                <td>{(computed.total.VS.L/15).toFixed(2)}</td>
+                <td>{(computed.total.VS.E/15).toFixed(2)}</td>
+                <td>{(computed.sumVS/15).toFixed(2)}</td>
+
+                {/* Udio VS desno */}
+                <td>
+                  <div style={{display:"flex", gap:8}}>
+                    <span style={{opacity:.8}}>Udio VS:</span>
+                    <strong>{computed.pctVS.toFixed(2)}%</strong>
+                  </div>
+                </td>
               </tr>
+
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>
+                  Ukupno:
+                </td>
                 <td>{computed.total.ALL.L}</td>
                 <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
-                <td colSpan={2} style={{textAlign:"right", fontWeight:700}}>Udio ukupno:</td>
-                <td>100.00%</td>
-                <td></td>
+                <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.E/15).toFixed(2)}</td>
+                <td>{(computed.sumALL/15).toFixed(2)}</td>
+
+                {/* Ukupno 100% desno */}
+                <td>
+                  <div style={{display:"flex", gap:8}}>
+                    <span style={{opacity:.8}}>Ukupno:</span>
+                    <strong>100%</strong>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
-
-          <div style={{ marginTop: 12, display:"flex", gap:8 }}>
-            <button className="btn" onClick={exportXLSX}>
-              Download Excel (.xlsx)
-            </button>
-          </div>
         </>
       )}
     </div>
   );
-}
-
-/** helpers */
-function professorEngagement(prof) {
-  return prof?.engagement === "EMPLOYED" || prof?.engagement === "EXTERNAL"
-    ? prof.engagement
-    : undefined;
-}
-function groupBySubject(rows) {
-  const order = [];
-  const map = new Map();
-  rows.forEach((r) => {
-    if (!map.has(r.subjectId)) {
-      map.set(r.subjectId, []);
-      order.push(r.subjectId);
-    }
-    map.get(r.subjectId).push(r);
-  });
-  return order.map((sid) => ({
-    subjectId: sid,
-    subject: map.get(sid)?.[0]?.subject,
-    rows: map.get(sid),
-  }));
 }
