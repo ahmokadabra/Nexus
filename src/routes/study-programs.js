@@ -19,12 +19,12 @@ router.get("/", async (_req, res) => {
 
 const upsertSchema = z.object({
   name: z.string().min(1, "Naziv je obavezan"),
-  code: z.string().trim().optional().nullable(),
+  code: z.string().trim().optional().nullable(), // smije biti null/prazno
 });
 
 /**
  * POST /api/programs
- * Kreira program (ako je code dat i postoji -> upsert po code).
+ * Kreira program (ako je code dat i već postoji -> upsert po code).
  */
 router.post("/", async (req, res) => {
   const parsed = upsertSchema.safeParse(req.body);
@@ -40,14 +40,13 @@ router.post("/", async (req, res) => {
         create: { name: data.name, code: data.code },
       });
     } else {
-      created = await prisma.studyProgram.create({ data: { name: data.name } });
+      created = await prisma.studyProgram.create({ data: { name: data.name, code: null } });
     }
-    // vrati i years da UI odmah vidi stanje
     const withYears = await prisma.studyProgram.findUnique({
       where: { id: created.id },
       include: { years: { orderBy: { yearNumber: "asc" } } },
     });
-    res.json(withYears);
+    res.status(201).json(withYears);
   } catch (e) {
     res.status(400).json({ message: "Cannot create", detail: String(e?.message || e) });
   }
@@ -55,23 +54,25 @@ router.post("/", async (req, res) => {
 
 /**
  * PUT /api/programs/:id
- * Update imena/koda.
+ * Inline update: naziv i/ili šifra.
  */
 router.put("/:id", async (req, res) => {
-  const schema = upsertSchema.partial().extend({
-    name: z.string().min(1).optional(),
-    code: z.string().trim().optional().nullable(),
-  });
-  const parsed = schema.safeParse(req.body);
+  const parsed = upsertSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
+  const { name, code } = parsed.data;
 
   try {
     await prisma.studyProgram.update({
-      where: { id: req.params.id },
-      data: parsed.data,
+      where: { id: String(req.params.id) },
+      data: {
+        ...(name !== undefined ? { name } : {}),
+        ...(code !== undefined ? { code: code?.trim() || null } : {}),
+      },
     });
+
     const withYears = await prisma.studyProgram.findUnique({
-      where: { id: req.params.id },
+      where: { id: String(req.params.id) },
       include: { years: { orderBy: { yearNumber: "asc" } } },
     });
     res.json(withYears);
@@ -82,12 +83,11 @@ router.put("/:id", async (req, res) => {
 
 /**
  * DELETE /api/programs/:id
- * Napomena: ako postoje zavisni redovi (ProgramYear, SubjectOnProgramYear, PRNPlan),
- * ovo može pasti zbog FK ograničenja. Ostavljen je osnovni delete kao i ranije.
+ * (Ako postoje zavisni redovi, ovo može pasti zbog FK-ova – isto kao i ranije.)
  */
 router.delete("/:id", async (req, res) => {
   try {
-    await prisma.studyProgram.delete({ where: { id: req.params.id } });
+    await prisma.studyProgram.delete({ where: { id: String(req.params.id) } });
     res.status(204).end();
   } catch (e) {
     res.status(400).json({ message: "Cannot delete", detail: String(e?.message || e) });
@@ -96,14 +96,15 @@ router.delete("/:id", async (req, res) => {
 
 /**
  * POST /api/programs/:id/years
- * Dodaje godinu programu (1..10), sprječava duplikat.
+ * Dodaj godinu (1..10) – sprečava duplikate.
  */
 router.post("/:id/years", async (req, res) => {
-  const schema = z.object({ yearNumber: z.coerce.number().int().min(1).max(10) });
-  const parsed = schema.safeParse(req.body);
+  const parsed = z
+    .object({ yearNumber: z.coerce.number().int().min(1).max(10) })
+    .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
 
-  const programId = req.params.id;
+  const programId = String(req.params.id);
   const { yearNumber } = parsed.data;
 
   const prog = await prisma.studyProgram.findUnique({ where: { id: programId } });
@@ -121,19 +122,18 @@ router.post("/:id/years", async (req, res) => {
  * Briše godinu po broju.
  */
 router.delete("/:id/years/:yearNumber", async (req, res) => {
-  const programId = req.params.id;
-  const yearNumber = Number(req.params.yearNumber);
+  const programId = String(req.params.id);
+  const yearNumber = Number(req.params.yearNumber) || 0;
   await prisma.programYear.deleteMany({ where: { programId, yearNumber } });
   res.json({ ok: true });
 });
 
 /**
  * (Opcionalno) GET /api/programs/:id
- * Ako ti zatreba u UI-ju.
  */
 router.get("/:id", async (req, res) => {
   const row = await prisma.studyProgram.findUnique({
-    where: { id: req.params.id },
+    where: { id: String(req.params.id) },
     include: { years: { orderBy: { yearNumber: "asc" } } },
   });
   if (!row) return res.status(404).json({ message: "Not found" });
