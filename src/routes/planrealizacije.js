@@ -21,7 +21,7 @@ const FACULTY_BY_CODE = {
 
 router.get("/health", (_req, res) => res.json({ ok: true, scope: "planrealizacije" }));
 
-// ⚙️ Jednokratni seed studijskih programa (sigurno radi više puta — upsert)
+// ⚙️ Jednokratni seed studijskih programa (idempotentno)
 router.post("/seed-programs", async (_req, res) => {
   const data = [
     { code: "FIR", name: "Finansije i računovodstvo" },
@@ -41,7 +41,7 @@ router.post("/seed-programs", async (_req, res) => {
     const all = await prisma.studyProgram.findMany({ orderBy: { name: "asc" } });
     res.json({ ok: true, count: all.length, programs: all });
   } catch (e) {
-    res.status(500).json({ message: "Seed failed", detail: e.message });
+    res.status(500).json({ message: "Seed failed", detail: String(e?.message || e) });
   }
 });
 
@@ -51,69 +51,75 @@ router.get("/programs", async (_req, res) => {
   res.json(programs);
 });
 
-// Dohvati ili kreiraj PRN plan za dati program i godinu (+ autoseed redova iz SubjectProgram)
+// Dohvati ili kreiraj PRN plan za dati program i godinu (+ autoseed redova iz SubjectOnProgramYear)
 router.get("/plan", async (req, res) => {
   const parsed = planQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
   const { programId, year } = parsed.data;
 
-  const program = await prisma.studyProgram.findUnique({ where: { id: programId } });
-  if (!program) return res.status(404).json({ message: "Program not found" });
+  try {
+    const program = await prisma.studyProgram.findUnique({ where: { id: programId } });
+    if (!program) return res.status(404).json({ message: "Program not found" });
 
-  let plan = await prisma.pRNPlan.findUnique({
-    where: { programId_yearNumber: { programId, yearNumber: year } },
-  });
-
-  if (!plan) {
-    plan = await prisma.pRNPlan.create({ data: { programId, yearNumber: year } });
-
-    // Predmeti za dati program i godinu iz SubjectProgram (many-to-many sa dodatnim poljem yearNumber)
-    const subjectLinks = await prisma.subjectProgram.findMany({
-      where: { programId, yearNumber: year },
-      select: { subjectId: true },
+    // KORIGIRANO: koristi se ime unique constrainta iz sheme ("uniq_plan_per_program_year")
+    let plan = await prisma.pRNPlan.findUnique({
+      where: { uniq_plan_per_program_year: { programId, yearNumber: year } },
     });
 
-    const uniqueSubjectIds = [...new Set(subjectLinks.map((x) => x.subjectId))];
-    if (uniqueSubjectIds.length) {
-      await prisma.pRNRow.createMany({
-        data: uniqueSubjectIds.map((sid) => ({
-          planId: plan.id,
-          subjectId: sid,
-          lectureTotal: 0,
-          exerciseTotal: 0,
-        })),
-        skipDuplicates: true,
+    // ako ne postoji plan – kreiraj i seed-aj redove iz SubjectOnProgramYear za tu godinu
+    if (!plan) {
+      plan = await prisma.pRNPlan.create({ data: { programId, yearNumber: year } });
+
+      const subjectLinks = await prisma.subjectOnProgramYear.findMany({
+        where: { programId, yearNumber: year },
+        select: { subjectId: true },
       });
+
+      const uniqueSubjectIds = [...new Set(subjectLinks.map((x) => x.subjectId))];
+      if (uniqueSubjectIds.length) {
+        await prisma.pRNRow.createMany({
+          data: uniqueSubjectIds.map((sid) => ({
+            planId: plan.id,
+            subjectId: sid,
+            // polja ostavi kako ih koristi tvoj UI (ukoliko si u modelu PRNRow koristio lectureTotal/exerciseTotal)
+            lectureTotal: 0,
+            exerciseTotal: 0,
+          })),
+          // radi samo ako postoji unique index (npr. @@unique([planId, subjectId]))
+          skipDuplicates: true,
+        });
+      }
     }
-  }
 
-  const full = await prisma.pRNPlan.findUnique({
-    where: { id: plan.id },
-    include: {
-      program: true,
-      rows: {
-        include: {
-          subject: {
-            include: { subjectPrograms: { include: { program: true } } },
+    // vrati pun plan sa redovima
+    const full = await prisma.pRNPlan.findUnique({
+      where: { id: plan.id },
+      include: {
+        program: true,
+        rows: {
+          include: {
+            subject: { include: { subjectPrograms: { include: { program: true } } } },
+            professor: true,
           },
-          professor: true,
+          orderBy: [{ subject: { code: "asc" } }, { subject: { name: "asc" } }],
         },
-        orderBy: [{ subject: { code: "asc" } }, { subject: { name: "asc" } }],
       },
-    },
-  });
+    });
 
-  const facultyName = FACULTY_BY_CODE[full.program.code || ""] || "";
+    const facultyName = FACULTY_BY_CODE[full.program.code || ""] || "";
 
-  res.json({
-    plan: {
-      id: full.id,
-      program: full.program,
-      facultyName,
-      yearNumber: full.yearNumber,
-    },
-    rows: full.rows,
-  });
+    res.json({
+      plan: {
+        id: full.id,
+        program: full.program,
+        facultyName,
+        yearNumber: full.yearNumber,
+      },
+      rows: full.rows,
+    });
+  } catch (e) {
+    res.status(500).json({ message: "PRN plan error", detail: String(e?.message || e) });
+  }
 });
 
 // Ažuriranje jednog reda (profesor/sati)
@@ -126,6 +132,7 @@ const rowUpdateSchema = z.object({
 router.put("/rows/:id", async (req, res) => {
   const parsed = rowUpdateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
   try {
     const updated = await prisma.pRNRow.update({
       where: { id: req.params.id },
@@ -140,7 +147,7 @@ router.put("/rows/:id", async (req, res) => {
     });
     res.json(updated);
   } catch (e) {
-    res.status(400).json({ message: "Cannot update", detail: e.message });
+    res.status(400).json({ message: "Cannot update", detail: String(e?.message || e) });
   }
 });
 
