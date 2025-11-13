@@ -221,6 +221,50 @@ router.put("/rows/:id", async (req, res) => {
   }
 });
 
+// DODAJ NASTAVNIKA (novi red za isti predmet u istom planu)
+const addRowSchema = z.object({
+  planId: z.string().min(1),
+  subjectId: z.string().min(1),
+});
+
+router.post("/rows", async (req, res) => {
+  const parsed = addRowSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
+  const { planId, subjectId } = parsed.data;
+
+  try {
+    // provjera da plan postoji
+    const plan = await prisma.pRNPlan.findUnique({ where: { id: planId } });
+    if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    // kreiraj novi red bez profesora, sati 0
+    const created = await prisma.pRNRow.create({
+      data: {
+        planId,
+        subjectId,
+        lectureHours: 0,   // <- u shemi su lectureHours/exerciseHours
+        exerciseHours: 0,
+        professorId: null,
+      },
+      include: {
+        subject: { include: { subjectPrograms: { include: { program: true } } } },
+        professor: true,
+      },
+    });
+
+    // mapiranje na nazive koje UI očekuje
+    res.status(201).json({
+      ...created,
+      lectureTotal: created.lectureHours ?? 0,
+      exerciseTotal: created.exerciseHours ?? 0,
+    });
+  } catch (e) {
+    res.status(400).json({ message: "Cannot add teacher row", detail: String(e?.message || e) });
+  }
+});
+
+
 // (opcionalno) lista planova
 router.get("/", async (req, res) => {
   const { programId, year } = req.query;

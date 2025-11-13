@@ -1,3 +1,4 @@
+// frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut } from "../lib/api";
 
@@ -22,6 +23,7 @@ export default function PlanRealizacije() {
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // učitaj programe + profesore
   useEffect(() => {
     (async () => {
       try {
@@ -42,14 +44,17 @@ export default function PlanRealizacije() {
     setLoading(true);
     setMsg(null);
     try {
-      const data = await apiGet(`/api/planrealizacije/plan?programId=${encodeURIComponent(pid)}&year=${yr}`);
+      const data = await apiGet(
+        `/api/planrealizacije/plan?programId=${encodeURIComponent(pid)}&year=${yr}`
+      );
       setPlan(data.plan);
       setRows(
-        (data.rows || []).map(r => ({
+        (data.rows || []).map((r) => ({
           ...r,
           _edit: {
-            professorId:   r.professorId || "",
-            lectureTotal:  r.lectureTotal ?? 0,
+            professorId: r.professorId || "",
+            // Napomena: backend može vraćati lectureTotal/exerciseTotal ili mapirano iz lectureHours/exerciseHours
+            lectureTotal: r.lectureTotal ?? 0,
             exerciseTotal: r.exerciseTotal ?? 0,
             saving: false,
           },
@@ -79,6 +84,7 @@ export default function PlanRealizacije() {
     }
   }
 
+  // Popuni redove iz predmeta (ako nema)
   async function syncRows(prune = false) {
     try {
       setMsg(null);
@@ -95,29 +101,33 @@ export default function PlanRealizacije() {
   }
 
   function changeRow(id, patch) {
-    setRows(arr => arr.map(r => (r.id === id ? { ...r, _edit: { ...r._edit, ...patch } } : r)));
+    setRows((arr) =>
+      arr.map((r) => (r.id === id ? { ...r, _edit: { ...r._edit, ...patch } } : r))
+    );
   }
 
   async function saveRow(r) {
     if (!r?._edit) return;
     const body = {
-      professorId:   r._edit.professorId === "" ? null : String(r._edit.professorId),
-      lectureTotal:  Number(r._edit.lectureTotal)  || 0,
+      professorId: r._edit.professorId === "" ? null : String(r._edit.professorId),
+      lectureTotal: Number(r._edit.lectureTotal) || 0,
       exerciseTotal: Number(r._edit.exerciseTotal) || 0,
     };
     changeRow(r.id, { saving: true });
     try {
       const saved = await apiPut(`/api/planrealizacije/rows/${r.id}`, body);
       setMsg({ type: "ok", text: "Sačuvano" });
-      setRows(arr =>
-        arr.map(x =>
+      setRows((arr) =>
+        arr.map((x) =>
           x.id === r.id
             ? {
                 ...x,
-                professorId:   saved.professorId,
-                lectureTotal:  saved.lectureTotal,
+                professorId: saved.professorId,
+                lectureTotal: saved.lectureTotal,
                 exerciseTotal: saved.exerciseTotal,
-                professor:     saved.professor ?? (body.professorId ? (profs.find(p => p.id === body.professorId) || null) : null),
+                professor:
+                  saved.professor ??
+                  (body.professorId ? profs.find((p) => p.id === body.professorId) || null : null),
                 _edit: { ...x._edit, saving: false },
               }
             : x
@@ -129,58 +139,114 @@ export default function PlanRealizacije() {
     }
   }
 
+  // 🔹 NOVO: dodaj nastavnika (novi red za isti subject)
+  async function addTeacher(subjectId) {
+    if (!plan?.id) return;
+    try {
+      setMsg(null);
+      const newRow = await apiPost("/api/planrealizacije/rows", {
+        planId: plan.id,
+        subjectId,
+      });
+      // osiguraj _edit state
+      const prepared = {
+        ...newRow,
+        _edit: {
+          professorId: newRow.professorId || "",
+          lectureTotal: newRow.lectureTotal ?? 0,
+          exerciseTotal: newRow.exerciseTotal ?? 0,
+          saving: false,
+        },
+      };
+      setRows((arr) => [...arr, prepared]);
+      setMsg({ type: "ok", text: "Dodat nastavnik na predmet" });
+    } catch (e) {
+      setMsg({ type: "err", text: e.message });
+    }
+  }
+
+  // proračuni
   const computed = useMemo(() => {
     const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
-    rows.forEach(r => {
+    rows.forEach((r) => {
       const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
       const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
       const bucket = r.professor?.engagement ? ENG_MAP[r.professor.engagement] : null;
-      total.ALL.L += L; total.ALL.E += E;
-      if (bucket === "RO") { total.RO.L += L; total.RO.E += E; }
-      else if (bucket === "VS") { total.VS.L += L; total.VS.E += E; }
+      total.ALL.L += L;
+      total.ALL.E += E;
+      if (bucket === "RO") {
+        total.RO.L += L;
+        total.RO.E += E;
+      } else if (bucket === "VS") {
+        total.VS.L += L;
+        total.VS.E += E;
+      }
     });
     const sum = (o) => o.L + o.E;
     return { total, sumALL: sum(total.ALL), sumRO: sum(total.RO), sumVS: sum(total.VS) };
   }, [rows]);
 
-  const currentProgram = programs.find(p => p.id === selectedProgramId);
+  const currentProgram = programs.find((p) => p.id === selectedProgramId);
 
   return (
     <div>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <h2>Plan realizacije nastave</h2>
-        <div style={{display:"flex", gap:8, alignItems:"center"}}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {programs.length === 0 ? (
-            <button className="btn" onClick={seedPrograms}>Dodaj standardne studijske programe</button>
+            <button className="btn" onClick={seedPrograms}>
+              Dodaj standardne studijske programe
+            </button>
           ) : null}
-          <div style={{display:"flex", gap:6}}>
-            {[1,2,3,4].map(y => (
-              <button key={y} className="btn" style={{opacity: year===y?1:0.7}} onClick={()=>setYear(y)}>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[1, 2, 3, 4].map((y) => (
+              <button
+                key={y}
+                className="btn"
+                style={{ opacity: year === y ? 1 : 0.7 }}
+                onClick={() => setYear(y)}
+              >
                 Godina {y}
               </button>
             ))}
           </div>
-          <button className="btn" onClick={()=>syncRows(false)} disabled={!selectedProgramId || loading}>
+          <button
+            className="btn"
+            onClick={() => syncRows(false)}
+            disabled={!selectedProgramId || loading}
+          >
             Popuni iz predmeta
           </button>
-          {/* <button className="btn" onClick={()=>syncRows(true)} disabled={!selectedProgramId || loading}>
-            Sync + očisti višak
-          </button> */}
         </div>
       </div>
 
       {/* Tabs programi */}
-      <div style={{display:"flex", gap:8, flexWrap:"wrap", margin:"8px 0"}}>
-        {programs.map(p => (
-          <button key={p.id} className="btn"
-            style={{ background: selectedProgramId===p.id ? "#2a2f3a" : "transparent", border: "1px solid #3a4152" }}
-            onClick={()=>setSelectedProgramId(p.id)} title={p.name}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
+        {programs.map((p) => (
+          <button
+            key={p.id}
+            className="btn"
+            style={{
+              background: selectedProgramId === p.id ? "#2a2f3a" : "transparent",
+              border: "1px solid #3a4152",
+            }}
+            onClick={() => setSelectedProgramId(p.id)}
+            title={p.name}
+          >
             {p.code || p.name}
           </button>
         ))}
       </div>
 
-      {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
+      {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
 
       {loading ? (
         <div>Učitavanje…</div>
@@ -190,10 +256,13 @@ export default function PlanRealizacije() {
         <div>Nema podataka za prikaz.</div>
       ) : (
         <>
-          <div style={{margin:"12px 0"}}>
-            <div style={{fontSize:18, fontWeight:700}}>Plan realizacije nastave</div>
+          {/* Header */}
+          <div style={{ margin: "12px 0" }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Plan realizacije nastave</div>
             <div>{plan.facultyName}</div>
-            <div>{currentProgram.name} ({currentProgram.code}) — Godina {plan.yearNumber}</div>
+            <div>
+              {currentProgram.name} ({currentProgram.code}) — Godina {plan.yearNumber}
+            </div>
           </div>
 
           <table className="table">
@@ -208,9 +277,16 @@ export default function PlanRealizacije() {
                 <th></th>
               </tr>
               <tr>
-                <th></th><th></th><th></th><th></th>
-                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
-                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
+                <th>Predavanja</th>
+                <th>Vježbe</th>
+                <th>Ukupno</th>
                 <th></th>
               </tr>
             </thead>
@@ -219,53 +295,89 @@ export default function PlanRealizacije() {
                 <tr>
                   <td colSpan={11}>
                     Nema redova za ovu godinu. Klikni{" "}
-                    <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
+                    <button className="btn" onClick={() => syncRows(false)}>
+                      “Popuni iz predmeta”
+                    </button>
+                    .
                   </td>
                 </tr>
               ) : (
-                rows.map(r => {
-                  const L  = Number(r._edit?.lectureTotal  ?? r.lectureTotal  ?? 0);
-                  const E  = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
-                  const U  = L + E;
-                  const Lw = (L/15) || 0, Ew = (E/15) || 0, Uw = (U/15) || 0;
-                  const subj  = r.subject || {};
-                  const ects  = subj.ects ?? "";
-                  const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
-                  const profId= r._edit?.professorId ?? r.professorId ?? "";
-                  const prof  = profs.find(p=>p.id===profId) || r.professor || null;
-                  const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-                  const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
+                rows.map((r) => {
+                  const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
+                  const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
+                  const U = L + E;
+                  const Lw = L / 15 || 0,
+                    Ew = E / 15 || 0,
+                    Uw = U / 15 || 0;
+                  const subj = r.subject || {};
+                  const ects = subj.ects ?? "";
+                  const joint = (subj.subjectPrograms || []).some(
+                    (sp) => sp.programId !== selectedProgramId
+                  );
+                  const profId = r._edit?.professorId ?? r.professorId ?? "";
+                  const prof = profs.find((p) => p.id === profId) || r.professor || null;
+                  const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+                  const title = prof?.title ? TITLE_MAP[prof.title] || prof.title : "";
 
                   return (
                     <tr key={r.id}>
                       <td>
-                        <div style={{fontWeight:600}}>{subj.name}</div>
-                        <div style={{fontSize:12, opacity:0.8}}>
+                        <div style={{ fontWeight: 600 }}>{subj.name}</div>
+                        <div style={{ fontSize: 12, opacity: 0.8 }}>
                           {subj.code ? `(${subj.code}) ` : ""}ECTS: {ects === "" ? "-" : ects}
                           {joint ? " • Zajednički predmet" : ""}
                         </div>
                       </td>
                       <td>P/V</td>
-                      <td style={{minWidth:220}}>
-                        <select className="input" value={String(profId)} onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}>
+                      <td style={{ minWidth: 220 }}>
+                        <select
+                          className="input"
+                          value={String(profId)}
+                          onChange={(e) => changeRow(r.id, { professorId: e.target.value })}
+                        >
                           <option value="">— odaberi —</option>
-                          {profs.map(p=>(
+                          {profs.map((p) => (
                             <option key={p.id} value={p.id}>
-                              {p.name}{p.title?` — ${TITLE_MAP[p.title]||p.title}`:""}
+                              {p.name}
+                              {p.title ? ` — ${TITLE_MAP[p.title] || p.title}` : ""}
                             </option>
                           ))}
                         </select>
                       </td>
                       <td>{anga}</td>
-                      <td><input className="input small" value={L} onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
-                      <td><input className="input small" value={E} onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
+                      <td>
+                        <input
+                          className="input small"
+                          value={L}
+                          onChange={(e) => changeRow(r.id, { lectureTotal: e.target.value })}
+                          inputMode="numeric"
+                          style={{ maxWidth: 90 }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input small"
+                          value={E}
+                          onChange={(e) => changeRow(r.id, { exerciseTotal: e.target.value })}
+                          inputMode="numeric"
+                          style={{ maxWidth: 90 }}
+                        />
+                      </td>
                       <td>{U}</td>
                       <td>{Lw.toFixed(2)}</td>
                       <td>{Ew.toFixed(2)}</td>
                       <td>{Uw.toFixed(2)}</td>
-                      <td style={{whiteSpace:"nowrap"}}>
-                        <button className="btn" onClick={()=>saveRow(r)} disabled={r._edit?.saving}>
+                      <td style={{ whiteSpace: "nowrap", display: "flex", gap: 6 }}>
+                        <button className="btn" onClick={() => saveRow(r)} disabled={r._edit?.saving}>
                           {r._edit?.saving ? "..." : "Save"}
+                        </button>
+                        {/* 🔹 NOVO dugme */}
+                        <button
+                          className="btn"
+                          title="Dodaj nastavnika za ovaj predmet"
+                          onClick={() => addTeacher(r.subjectId)}
+                        >
+                          Dodaj nastavnika
                         </button>
                       </td>
                     </tr>
@@ -274,33 +386,39 @@ export default function PlanRealizacije() {
               )}
               {/* Totali */}
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
+                <td colSpan={4} style={{ textAlign: "right", fontWeight: 600 }}>
+                  Ukupno iz radnog odnosa (RO):
+                </td>
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td>{(computed.total.RO.L/15).toFixed(2)}</td>
-                <td>{(computed.total.RO.E/15).toFixed(2)}</td>
-                <td>{(computed.sumRO/15).toFixed(2)}</td>
+                <td>{(computed.total.RO.L / 15).toFixed(2)}</td>
+                <td>{(computed.total.RO.E / 15).toFixed(2)}</td>
+                <td>{(computed.sumRO / 15).toFixed(2)}</td>
                 <td></td>
               </tr>
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz honorarnog angažmana (VS):</td>
+                <td colSpan={4} style={{ textAlign: "right", fontWeight: 600 }}>
+                  Ukupno iz honorarnog angažmana (VS):
+                </td>
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td>{(computed.total.VS.L/15).toFixed(2)}</td>
-                <td>{(computed.total.VS.E/15).toFixed(2)}</td>
-                <td>{(computed.sumVS/15).toFixed(2)}</td>
+                <td>{(computed.total.VS.L / 15).toFixed(2)}</td>
+                <td>{(computed.total.VS.E / 15).toFixed(2)}</td>
+                <td>{(computed.sumVS / 15).toFixed(2)}</td>
                 <td></td>
               </tr>
               <tr>
-                <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
+                <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>
+                  Ukupno:
+                </td>
                 <td>{computed.total.ALL.L}</td>
                 <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
-                <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
-                <td>{(computed.total.ALL.E/15).toFixed(2)}</td>
-                <td>{(computed.sumALL/15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.L / 15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.E / 15).toFixed(2)}</td>
+                <td>{(computed.sumALL / 15).toFixed(2)}</td>
                 <td></td>
               </tr>
             </tbody>
