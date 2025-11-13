@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut } from "../lib/api";
+import * as XLSX from "xlsx";
 
 const TITLE_MAP = {
   PRACTITIONER: "Stručnjak iz prakse",
@@ -87,21 +88,6 @@ export default function PlanRealizacije() {
     }
   }
 
-  async function syncRows(prune = false) {
-    try {
-      setMsg(null);
-      await apiPost("/api/planrealizacije/plan/seed-rows", {
-        programId: selectedProgramId,
-        year,
-        prune,
-      });
-      await loadPlan();
-      setMsg({ type: "ok", text: prune ? "Sync + čišćenje gotovo" : "Dodani redovi iz predmeta" });
-    } catch (e) {
-      setMsg({ type: "err", text: e.message });
-    }
-  }
-
   function changeRow(id, patch) {
     setRows((arr) =>
       arr.map((r) => (r.id === id ? { ...r, _edit: { ...r._edit, ...patch } } : r))
@@ -175,7 +161,6 @@ export default function PlanRealizacije() {
     }
   }
 
-  // Grupisanje po predmetu (za rowspan)
   const groups = useMemo(() => {
     const order = [];
     const map = new Map();
@@ -193,7 +178,6 @@ export default function PlanRealizacije() {
     }));
   }, [rows]);
 
-  // Totali + procenti RO/VS
   const computed = useMemo(() => {
     const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
     rows.forEach((r) => {
@@ -214,7 +198,6 @@ export default function PlanRealizacije() {
     const sumALL = sum(total.ALL);
     const sumRO = sum(total.RO);
     const sumVS = sum(total.VS);
-
     let pRO = 0,
       pVS = 0;
     if (sumALL > 0) {
@@ -228,80 +211,86 @@ export default function PlanRealizacije() {
 
   const currentProgram = programs.find((p) => p.id === selectedProgramId);
 
-  // ==== Export u CSV (za Excel) ====
-  function exportCSV() {
+  // ======= EXPORT XLSX =======
+  function exportXLSX() {
     if (!plan) return;
-    const header = [
-      "Predmet",
-      "Šifra",
-      "Tip (P/V)",
-      "Nastavnik",
-      "Angažman (RO/VS)",
-      "Predavanja",
-      "Vježbe",
-      "Ukupno",
-      "Sedmično P",
-      "Sedmično V",
-      "Sedmično ∑",
+
+    // AOA data
+    const aoa = [
+      ["Predmet", "Šifra", "Tip (P/V)", "Nastavnik", "Angažman (RO/VS)", "Predavanja", "Vježbe", "Ukupno", "Sedmično P", "Sedmično V", "Sedmično ∑"],
     ];
-    const lines = [header];
 
-    rows.forEach((r) => {
-      const subj = r.subject || {};
-      const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
-      const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
-      const U = L + E;
-      const Lw = (L / 15) || 0;
-      const Ew = (E / 15) || 0;
-      const Uw = (U / 15) || 0;
-      const profId = r._edit?.professorId ?? r.professorId ?? "";
-      const prof = profs.find((p) => p.id === profId) || r.professor || null;
-      const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-      const kind = r._edit?.kind || "P";
+    const merges = []; // merge Subject kolone po grupama (col 0)
 
-      lines.push([
-        safeCSV(subj.name),
-        safeCSV(subj.code || ""),
-        kind,
-        safeCSV(prof?.name || ""),
-        anga,
-        L,
-        E,
-        U,
-        Lw.toFixed(2),
-        Ew.toFixed(2),
-        Uw.toFixed(2),
-      ]);
+    let excelRow = 1; // nakon headera
+    groups.forEach((g) => {
+      g.rows.forEach((r, idx) => {
+        const subj = g.subject || {};
+        const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
+        const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
+        const U = L + E;
+        const Lw = (L / 15) || 0;
+        const Ew = (E / 15) || 0;
+        const Uw = (U / 15) || 0;
+        const profId = r._edit?.professorId ?? r.professorId ?? "";
+        const prof = profs.find((p) => p.id === profId) || r.professor || null;
+        const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+        const kind = r._edit?.kind || "P";
+
+        aoa.push([
+          idx === 0 ? subj.name : "", // samo prvi red grupe puni naziv (radi merge-a)
+          subj.code || "",
+          kind,
+          prof?.name || "",
+          anga,
+          L,
+          E,
+          U,
+          Lw.toFixed(2),
+          Ew.toFixed(2),
+          Uw.toFixed(2),
+        ]);
+        excelRow++;
+      });
+
+      if (g.rows.length > 1) {
+        // spoji Subject kolonu (A) od prvog do zadnjeg reda grupe
+        const startR = excelRow - g.rows.length; // top ćelija grupe
+        const endR = excelRow - 1; // bottom ćelija grupe
+        merges.push({ s: { r: startR, c: 0 }, e: { r: endR, c: 0 } });
+      }
     });
 
-    // summary
-    lines.push([]);
-    lines.push(["Ukupno RO", "", "", "", "", computed.total.RO.L, computed.total.RO.E, computed.sumRO, "", "", ""]);
-    lines.push(["Udio RO (%)", "", "", "", "", "", "", `${computed.pRO.toFixed(2)}%`, "", "", ""]);
-    lines.push(["Ukupno VS", "", "", "", "", computed.total.VS.L, computed.total.VS.E, computed.sumVS, "", "", ""]);
-    lines.push(["Udio VS (%)", "", "", "", "", "", "", `${computed.pVS.toFixed(2)}%`, "", "", ""]);
-    lines.push(["Ukupno", "", "", "", "", computed.total.ALL.L, computed.total.ALL.E, computed.sumALL, "", "", ""]);
-    lines.push(["Udio ukupno", "", "", "", "", "", "", "100.00%", "", "", ""]);
+    // prazna linija, pa summary
+    aoa.push([]);
+    aoa.push(["Ukupno RO", "", "", "", "", computed.total.RO.L, computed.total.RO.E, computed.sumRO, "", "", ""]);
+    aoa.push(["Udio RO (%)", "", "", "", "", "", "", `${computed.pRO.toFixed(2)}%`, "", "", ""]);
+    aoa.push(["Ukupno VS", "", "", "", "", computed.total.VS.L, computed.total.VS.E, computed.sumVS, "", "", ""]);
+    aoa.push(["Udio VS (%)", "", "", "", "", "", "", `${computed.pVS.toFixed(2)}%`, "", "", ""]);
+    aoa.push(["Ukupno", "", "", "", "", computed.total.ALL.L, computed.total.ALL.E, computed.sumALL, "", "", ""]);
+    aoa.push(["Udio ukupno", "", "", "", "", "", "", "100.00%", "", "", ""]);
 
-    const csv = lines
-      .map((row) => row.map((c) => (typeof c === "string" ? c : String(c))).join(","))
-      .join("\r\n");
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!merges"] = merges;
+    ws["!cols"] = [
+      { wch: 36 }, // Predmet
+      { wch: 10 }, // Šifra
+      { wch: 7 },  // Tip
+      { wch: 26 }, // Nastavnik
+      { wch: 10 }, // Angažman
+      { wch: 12 }, // P
+      { wch: 12 }, // V
+      { wch: 12 }, // ∑
+      { wch: 12 }, // P/7
+      { wch: 12 }, // V/7
+      { wch: 12 }, // ∑/7
+    ];
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const a = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    a.href = url;
-    const namePart = (currentProgram?.code || currentProgram?.name || "program").replace(/\s+/g, "_");
-    a.download = `plan_realizacije_${namePart}_god${year}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function safeCSV(s) {
-    if (s == null) return "";
-    const needsQuotes = /[",\n]/.test(s);
-    const v = String(s).replace(/"/g, '""');
-    return needsQuotes ? `"${v}"` : v;
+    const wb = XLSX.utils.book_new();
+    const sheetName = `${(currentProgram?.code || "Program")}-god${year}`;
+    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    const fileBase = (currentProgram?.code || currentProgram?.name || "program").replace(/\s+/g, "_");
+    XLSX.writeFile(wb, `plan_realizacije_${fileBase}_god${year}.xlsx`);
   }
 
   return (
@@ -319,8 +308,8 @@ export default function PlanRealizacije() {
               </button>
             ))}
           </div>
-          <button className="btn" onClick={()=>syncRows(false)} disabled={!selectedProgramId || loading}>
-            Popuni iz predmeta
+          <button className="btn" onClick={()=>loadPlan()} disabled={!selectedProgramId || loading}>
+            Refresh
           </button>
         </div>
       </div>
@@ -372,20 +361,13 @@ export default function PlanRealizacije() {
               </tr>
             </thead>
             <tbody>
-              {/* Grupe po predmetu */}
-              {(() => {
-                const groups = groupBySubject(rows);
-                if (groups.length === 0) {
-                  return (
-                    <tr>
-                      <td colSpan={11}>
-                        Nema redova za ovu godinu. Klikni{" "}
-                        <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
-                      </td>
-                    </tr>
-                  );
-                }
-                return groups.flatMap((g) =>
+              {groups.length === 0 ? (
+                <tr>
+                  <td colSpan={11}>
+                    Nema redova za ovu godinu. Dodaj predmete u bazi i poveži program/godinu, pa klikni <button className="btn" onClick={()=>loadPlan()}>Refresh</button>.
+                  </td>
+                </tr>
+              ) : groups.flatMap((g) =>
                   g.rows.map((r, idx) => {
                     const L  = Number(r._edit?.lectureTotal  ?? r.lectureTotal  ?? 0);
                     const E  = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
@@ -396,13 +378,11 @@ export default function PlanRealizacije() {
                     const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
                     const profId= r._edit?.professorId ?? r.professorId ?? "";
                     const prof  = profs.find(p=>p.id===profId) || r.professor || null;
-                    const anga  = prof?.engagement ? ENG_MAP[professorEngagement(prof)] : "-";
-                    const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
+                    const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
                     const kind  = r._edit?.kind || "P";
 
                     return (
                       <tr key={r.id}>
-                        {/* Subject cell spojen preko svih redova grupe */}
                         {idx === 0 && (
                           <td rowSpan={g.rows.length}>
                             <div style={{fontWeight:600}}>{subj.name}</div>
@@ -412,8 +392,6 @@ export default function PlanRealizacije() {
                             </div>
                           </td>
                         )}
-
-                        {/* P/V uži select */}
                         <td>
                           <select
                             className="input small"
@@ -425,8 +403,6 @@ export default function PlanRealizacije() {
                             <option value="V">V</option>
                           </select>
                         </td>
-
-                        {/* Nastavnik */}
                         <td style={{minWidth:220}}>
                           <select className="input" value={String(profId)} onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}>
                             <option value="">— odaberi —</option>
@@ -437,11 +413,7 @@ export default function PlanRealizacije() {
                             ))}
                           </select>
                         </td>
-
-                        {/* Angažman */}
                         <td>{anga}</td>
-
-                        {/* Ukupno (količina) */}
                         <td>
                           <input
                             className="input small"
@@ -463,13 +435,9 @@ export default function PlanRealizacije() {
                           />
                         </td>
                         <td>{U}</td>
-
-                        {/* Sedmična pokrivenost (ostaje u redovima) */}
                         <td>{Lw.toFixed(2)}</td>
                         <td>{Ew.toFixed(2)}</td>
                         <td>{Uw.toFixed(2)}</td>
-
-                        {/* Akcije */}
                         <td style={{whiteSpace:"nowrap", display:"flex", gap:6}}>
                           <button className="btn" onClick={()=>saveRow(r)} disabled={r._edit?.saving}>
                             {r._edit?.saving ? "..." : "Save"}
@@ -483,10 +451,10 @@ export default function PlanRealizacije() {
                       </tr>
                     );
                   })
-                );
-              })()}
+                )
+              }
 
-              {/* ===== Footer: RO/VS redovi + Ukupno (brojčano + 100%) u istom redu ===== */}
+              {/* Footer: RO/VS + Ukupno u istom redu s udjelima */}
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
                 <td>{computed.total.RO.L}</td>
@@ -517,10 +485,9 @@ export default function PlanRealizacije() {
             </tbody>
           </table>
 
-          {/* Download Excel (CSV) */}
-          <div style={{ marginTop: 12 }}>
-            <button className="btn" onClick={exportCSV}>
-              Download Excel (CSV)
+          <div style={{ marginTop: 12, display:"flex", gap:8 }}>
+            <button className="btn" onClick={exportXLSX}>
+              Download Excel (.xlsx)
             </button>
           </div>
         </>
@@ -535,7 +502,6 @@ function professorEngagement(prof) {
     ? prof.engagement
     : undefined;
 }
-
 function groupBySubject(rows) {
   const order = [];
   const map = new Map();
