@@ -41,6 +41,28 @@ app.get("/health", async (_req, res) => {
 });
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+// ✅ Health (i /api/health radi)
+app.get("/health", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+// ✅ Render internal health check expects /healthz
+app.get("/healthz", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).send("ok");
+  } catch (e) {
+    res.status(500).send("db:down");
+  }
+});
+
+
 /** API rute */
 app.use("/api/professors", professorsRouter);
 app.use("/api/subjects", subjectsRouter);
