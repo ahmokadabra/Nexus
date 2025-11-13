@@ -221,6 +221,41 @@ router.put("/rows/:id", async (req, res) => {
   }
 });
 
+// POST /api/planrealizacije/rows  -> kreira novi red za postojeći plan + subject
+router.post("/rows", async (req, res) => {
+  const schema = z.object({
+    planId: z.string().min(1),
+    subjectId: z.string().min(1),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
+
+  const { planId, subjectId } = parsed.data;
+
+  try {
+    // kreiraj prazan red (professorId null, sati 0)
+    const created = await prisma.pRNRow.create({
+      data: {
+        planId,
+        subjectId,
+        // ako koristiš lectureTotal/exerciseTotal kolone:
+        lectureTotal: 0,
+        exerciseTotal: 0,
+        // ako koristiš lectureHours/exerciseHours u bazi, zamijeni gore sa lectureHours/exerciseHours
+      },
+      include: {
+        subject: { include: { subjectPrograms: { include: { program: true } } } },
+        professor: true,
+      },
+    });
+
+    res.status(201).json(created);
+  } catch (e) {
+    res.status(400).json({ message: "Cannot create row", detail: String(e?.message || e) });
+  }
+});
+
+
 // DODAJ NASTAVNIKA (novi red za isti predmet u istom planu)
 const addRowSchema = z.object({
   planId: z.string().min(1),

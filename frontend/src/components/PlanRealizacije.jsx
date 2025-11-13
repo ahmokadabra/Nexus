@@ -53,7 +53,6 @@ export default function PlanRealizacije() {
           ...r,
           _edit: {
             professorId: r.professorId || "",
-            // Napomena: backend može vraćati lectureTotal/exerciseTotal ili mapirano iz lectureHours/exerciseHours
             lectureTotal: r.lectureTotal ?? 0,
             exerciseTotal: r.exerciseTotal ?? 0,
             saving: false,
@@ -84,7 +83,6 @@ export default function PlanRealizacije() {
     }
   }
 
-  // Popuni redove iz predmeta (ako nema)
   async function syncRows(prune = false) {
     try {
       setMsg(null);
@@ -139,7 +137,7 @@ export default function PlanRealizacije() {
     }
   }
 
-  // 🔹 NOVO: dodaj nastavnika (novi red za isti subject)
+  // 🔹 Dodaj nastavnika (novi red ispod grupe istog predmeta)
   async function addTeacher(subjectId) {
     if (!plan?.id) return;
     try {
@@ -148,7 +146,6 @@ export default function PlanRealizacije() {
         planId: plan.id,
         subjectId,
       });
-      // osiguraj _edit state
       const prepared = {
         ...newRow,
         _edit: {
@@ -158,12 +155,40 @@ export default function PlanRealizacije() {
           saving: false,
         },
       };
-      setRows((arr) => [...arr, prepared]);
-      setMsg({ type: "ok", text: "Dodat nastavnik na predmet" });
+      // ubaci odmah ispod zadnjeg reda tog predmeta
+      setRows((prev) => {
+        const idxs = [];
+        prev.forEach((x, i) => {
+          if (x.subjectId === subjectId) idxs.push(i);
+        });
+        const insertAt = idxs.length ? idxs[idxs.length - 1] + 1 : prev.length;
+        const next = [...prev];
+        next.splice(insertAt, 0, prepared);
+        return next;
+      });
+      setMsg({ type: "ok", text: "Dodat nastavnik za ovaj predmet" });
     } catch (e) {
       setMsg({ type: "err", text: e.message });
     }
   }
+
+  // Grupisanje po predmetu (radi rowspan)
+  const groups = useMemo(() => {
+    const order = [];
+    const map = new Map();
+    rows.forEach((r) => {
+      if (!map.has(r.subjectId)) {
+        map.set(r.subjectId, []);
+        order.push(r.subjectId);
+      }
+      map.get(r.subjectId).push(r);
+    });
+    return order.map((sid) => ({
+      subjectId: sid,
+      subject: map.get(sid)?.[0]?.subject,
+      rows: map.get(sid),
+    }));
+  }, [rows]);
 
   // proračuni
   const computed = useMemo(() => {
@@ -190,63 +215,37 @@ export default function PlanRealizacije() {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
         <h2>Plan realizacije nastave</h2>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{display:"flex", gap:8, alignItems:"center"}}>
           {programs.length === 0 ? (
-            <button className="btn" onClick={seedPrograms}>
-              Dodaj standardne studijske programe
-            </button>
+            <button className="btn" onClick={seedPrograms}>Dodaj standardne studijske programe</button>
           ) : null}
-          <div style={{ display: "flex", gap: 6 }}>
-            {[1, 2, 3, 4].map((y) => (
-              <button
-                key={y}
-                className="btn"
-                style={{ opacity: year === y ? 1 : 0.7 }}
-                onClick={() => setYear(y)}
-              >
+          <div style={{display:"flex", gap:6}}>
+            {[1,2,3,4].map(y => (
+              <button key={y} className="btn" style={{opacity: year===y?1:0.7}} onClick={()=>setYear(y)}>
                 Godina {y}
               </button>
             ))}
           </div>
-          <button
-            className="btn"
-            onClick={() => syncRows(false)}
-            disabled={!selectedProgramId || loading}
-          >
+          <button className="btn" onClick={()=>syncRows(false)} disabled={!selectedProgramId || loading}>
             Popuni iz predmeta
           </button>
         </div>
       </div>
 
       {/* Tabs programi */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "8px 0" }}>
-        {programs.map((p) => (
-          <button
-            key={p.id}
-            className="btn"
-            style={{
-              background: selectedProgramId === p.id ? "#2a2f3a" : "transparent",
-              border: "1px solid #3a4152",
-            }}
-            onClick={() => setSelectedProgramId(p.id)}
-            title={p.name}
-          >
+      <div style={{display:"flex", gap:8, flexWrap:"wrap", margin:"8px 0"}}>
+        {programs.map(p => (
+          <button key={p.id} className="btn"
+            style={{ background: selectedProgramId===p.id ? "#2a2f3a" : "transparent", border: "1px solid #3a4152" }}
+            onClick={()=>setSelectedProgramId(p.id)} title={p.name}>
             {p.code || p.name}
           </button>
         ))}
       </div>
 
-      {msg && <div className={msg.type === "ok" ? "success" : "error"}>{msg.text}</div>}
+      {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
 
       {loading ? (
         <div>Učitavanje…</div>
@@ -257,12 +256,10 @@ export default function PlanRealizacije() {
       ) : (
         <>
           {/* Header */}
-          <div style={{ margin: "12px 0" }}>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>Plan realizacije nastave</div>
+          <div style={{margin:"12px 0"}}>
+            <div style={{fontSize:18, fontWeight:700}}>Plan realizacije nastave</div>
             <div>{plan.facultyName}</div>
-            <div>
-              {currentProgram.name} ({currentProgram.code}) — Godina {plan.yearNumber}
-            </div>
+            <div>{currentProgram.name} ({currentProgram.code}) — Godina {plan.yearNumber}</div>
           </div>
 
           <table className="table">
@@ -277,148 +274,110 @@ export default function PlanRealizacije() {
                 <th></th>
               </tr>
               <tr>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th>Predavanja</th>
-                <th>Vježbe</th>
-                <th>Ukupno</th>
-                <th>Predavanja</th>
-                <th>Vježbe</th>
-                <th>Ukupno</th>
+                <th></th><th></th><th></th><th></th>
+                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
+                <th>Predavanja</th><th>Vježbe</th><th>Ukupno</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {groups.length === 0 ? (
                 <tr>
                   <td colSpan={11}>
                     Nema redova za ovu godinu. Klikni{" "}
-                    <button className="btn" onClick={() => syncRows(false)}>
-                      “Popuni iz predmeta”
-                    </button>
-                    .
+                    <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
                   </td>
                 </tr>
               ) : (
-                rows.map((r) => {
-                  const L = Number(r._edit?.lectureTotal ?? r.lectureTotal ?? 0);
-                  const E = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
-                  const U = L + E;
-                  const Lw = L / 15 || 0,
-                    Ew = E / 15 || 0,
-                    Uw = U / 15 || 0;
-                  const subj = r.subject || {};
-                  const ects = subj.ects ?? "";
-                  const joint = (subj.subjectPrograms || []).some(
-                    (sp) => sp.programId !== selectedProgramId
-                  );
-                  const profId = r._edit?.professorId ?? r.professorId ?? "";
-                  const prof = profs.find((p) => p.id === profId) || r.professor || null;
-                  const anga = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
-                  const title = prof?.title ? TITLE_MAP[prof.title] || prof.title : "";
+                groups.map((g) =>
+                  g.rows.map((r, idx) => {
+                    const L  = Number(r._edit?.lectureTotal  ?? r.lectureTotal  ?? 0);
+                    const E  = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
+                    const U  = L + E;
+                    const Lw = (L/15) || 0, Ew = (E/15) || 0, Uw = (U/15) || 0;
+                    const subj  = g.subject || {};
+                    const ects  = subj.ects ?? "";
+                    const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
+                    const profId= r._edit?.professorId ?? r.professorId ?? "";
+                    const prof  = profs.find(p=>p.id===profId) || r.professor || null;
+                    const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+                    const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
 
-                  return (
-                    <tr key={r.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{subj.name}</div>
-                        <div style={{ fontSize: 12, opacity: 0.8 }}>
-                          {subj.code ? `(${subj.code}) ` : ""}ECTS: {ects === "" ? "-" : ects}
-                          {joint ? " • Zajednički predmet" : ""}
-                        </div>
-                      </td>
-                      <td>P/V</td>
-                      <td style={{ minWidth: 220 }}>
-                        <select
-                          className="input"
-                          value={String(profId)}
-                          onChange={(e) => changeRow(r.id, { professorId: e.target.value })}
-                        >
-                          <option value="">— odaberi —</option>
-                          {profs.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                              {p.title ? ` — ${TITLE_MAP[p.title] || p.title}` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>{anga}</td>
-                      <td>
-                        <input
-                          className="input small"
-                          value={L}
-                          onChange={(e) => changeRow(r.id, { lectureTotal: e.target.value })}
-                          inputMode="numeric"
-                          style={{ maxWidth: 90 }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input small"
-                          value={E}
-                          onChange={(e) => changeRow(r.id, { exerciseTotal: e.target.value })}
-                          inputMode="numeric"
-                          style={{ maxWidth: 90 }}
-                        />
-                      </td>
-                      <td>{U}</td>
-                      <td>{Lw.toFixed(2)}</td>
-                      <td>{Ew.toFixed(2)}</td>
-                      <td>{Uw.toFixed(2)}</td>
-                      <td style={{ whiteSpace: "nowrap", display: "flex", gap: 6 }}>
-                        <button className="btn" onClick={() => saveRow(r)} disabled={r._edit?.saving}>
-                          {r._edit?.saving ? "..." : "Save"}
-                        </button>
-                        {/* 🔹 NOVO dugme */}
-                        <button
-                          className="btn"
-                          title="Dodaj nastavnika za ovaj predmet"
-                          onClick={() => addTeacher(r.subjectId)}
-                        >
-                          Dodaj nastavnika
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                    return (
+                      <tr key={r.id}>
+                        {/* subject cell samo jednom, spojen preko svih redova grupe */}
+                        {idx === 0 && (
+                          <td rowSpan={g.rows.length}>
+                            <div style={{fontWeight:600}}>{subj.name}</div>
+                            <div style={{fontSize:12, opacity:0.8}}>
+                              {subj.code ? `(${subj.code}) ` : ""}ECTS: {ects === "" ? "-" : ects}
+                              {joint ? " • Zajednički predmet" : ""}
+                            </div>
+                          </td>
+                        )}
+                        <td>P/V</td>
+                        <td style={{minWidth:220}}>
+                          <select className="input" value={String(profId)} onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}>
+                            <option value="">— odaberi —</option>
+                            {profs.map(p=>(
+                              <option key={p.id} value={p.id}>
+                                {p.name}{p.title?` — ${TITLE_MAP[p.title]||p.title}`:""}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>{anga}</td>
+                        <td><input className="input small" value={L} onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
+                        <td><input className="input small" value={E} onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
+                        <td>{U}</td>
+                        <td>{Lw.toFixed(2)}</td>
+                        <td>{Ew.toFixed(2)}</td>
+                        <td>{Uw.toFixed(2)}</td>
+                        <td style={{whiteSpace:"nowrap", display:"flex", gap:6}}>
+                          <button className="btn" onClick={()=>saveRow(r)} disabled={r._edit?.saving}>
+                            {r._edit?.saving ? "..." : "Save"}
+                          </button>
+                          {/* dugme se prikazuje na prvom redu grupe (logično mjesto uz spojen subject) */}
+                          {idx === 0 && (
+                            <button className="btn" title="Dodaj nastavnika za ovaj predmet" onClick={()=>addTeacher(g.subjectId)}>
+                              Dodaj nastavnika
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )
               )}
               {/* Totali */}
               <tr>
-                <td colSpan={4} style={{ textAlign: "right", fontWeight: 600 }}>
-                  Ukupno iz radnog odnosa (RO):
-                </td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td>{(computed.total.RO.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.RO.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumRO / 15).toFixed(2)}</td>
+                <td>{(computed.total.RO.L/15).toFixed(2)}</td>
+                <td>{(computed.total.RO.E/15).toFixed(2)}</td>
+                <td>{(computed.sumRO/15).toFixed(2)}</td>
                 <td></td>
               </tr>
               <tr>
-                <td colSpan={4} style={{ textAlign: "right", fontWeight: 600 }}>
-                  Ukupno iz honorarnog angažmana (VS):
-                </td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz honorarnog angažmana (VS):</td>
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td>{(computed.total.VS.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.VS.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumVS / 15).toFixed(2)}</td>
+                <td>{(computed.total.VS.L/15).toFixed(2)}</td>
+                <td>{(computed.total.VS.E/15).toFixed(2)}</td>
+                <td>{(computed.sumVS/15).toFixed(2)}</td>
                 <td></td>
               </tr>
               <tr>
-                <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>
-                  Ukupno:
-                </td>
+                <td colSpan={4} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
                 <td>{computed.total.ALL.L}</td>
                 <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
-                <td>{(computed.total.ALL.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.ALL.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumALL / 15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
+                <td>{(computed.total.ALL.E/15).toFixed(2)}</td>
+                <td>{(computed.sumALL/15).toFixed(2)}</td>
                 <td></td>
               </tr>
             </tbody>
