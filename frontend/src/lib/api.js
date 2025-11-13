@@ -1,13 +1,21 @@
 // frontend/src/lib/api.js
 
-// Bira backend bazu:
-// - prvo iz Vite env-a (VITE_API_BASE)
-// - onda iz window.__API_BASE__ ako postoji
-// - fallback: isti origin (npr. "/api/...").
-const RAW_BASE =
-  (import.meta?.env?.VITE_API_BASE ?? window.__API_BASE__ ?? "").trim();
+// ✅ Pametan default za Render: ako je frontend na *.onrender.com, a baza URL-a nije zadana,
+// koristimo backend domen: nexus-backend-ijh0.onrender.com
+const DEFAULT_BASE =
+  typeof window !== "undefined" &&
+  window.location.hostname.endsWith("onrender.com") &&
+  !/backend/i.test(window.location.hostname)
+    ? "https://nexus-backend-ijh0.onrender.com"
+    : "";
 
-const apiBase = RAW_BASE ? RAW_BASE.replace(/\/+$/, "") : "";
+// Prioritet: VITE_API_BASE (build time) -> window.__API_BASE__ (runtime) -> DEFAULT_BASE
+const RAW_BASE = String(
+  (import.meta?.env?.VITE_API_BASE ?? (typeof window !== "undefined" ? window.__API_BASE__ : "") ?? DEFAULT_BASE) || ""
+).trim();
+
+// Normalizovan API base (bez trailing slash)
+export const apiBase = RAW_BASE ? RAW_BASE.replace(/\/+$/, "") : "";
 
 // Sastavi pun URL za API rutu
 export function apiUrl(path) {
@@ -20,7 +28,9 @@ export function apiUrl(path) {
 export async function apiFetch(path, options = {}) {
   const url = apiUrl(path);
   const isJsonBody =
-    options.body && typeof options.body === "object" && !(options.body instanceof FormData);
+    options.body &&
+    typeof options.body === "object" &&
+    !(options.body instanceof FormData);
 
   const res = await fetch(url, {
     method: options.method || "GET",
@@ -51,7 +61,7 @@ export const apiPost = (p, body) => apiFetch(p, { method: "POST", body });
 export const apiPut = (p, body) => apiFetch(p, { method: "PUT", body });
 export const apiDelete = (p) => apiFetch(p, { method: "DELETE" });
 
-// ✅ XLSX downloader (OVO je falilo u tvom build-u)
+// ✅ XLSX downloader
 export async function downloadXlsx(path, filename = "data.xlsx") {
   const url = apiUrl(path);
   const res = await fetch(url, { method: "GET" });
@@ -66,21 +76,3 @@ export async function downloadXlsx(path, filename = "data.xlsx") {
   a.remove();
   URL.revokeObjectURL(a.href);
 }
-// frontend/src/lib/api.js
-const DEFAULT_BASE =
-  typeof window !== "undefined" &&
-  window.location.hostname.endsWith("onrender.com") &&
-  !/backend/i.test(window.location.hostname)
-    ? "https://nexus-backend-ijh0.onrender.com"
-    : "";
-
-const RAW_BASE = (import.meta?.env?.VITE_API_BASE ?? window.__API_BASE__ ?? DEFAULT_BASE).trim();
-const apiBase = RAW_BASE ? RAW_BASE.replace(/\/+$/, "") : "";
-
-export function apiUrl(path) {
-  if (/^https?:\/\//i.test(path)) return path;
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return apiBase ? `${apiBase}${p}` : p;
-}
-
-// ... ostatak ostaje isti (apiFetch, apiGet, apiPost, ...)
