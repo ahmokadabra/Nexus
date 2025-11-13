@@ -8,20 +8,20 @@ export const router = Router();
 // Zod sheme
 const programRefSchema = z.object({
   programId: z.string().min(1),
-  yearNumber: z.coerce.number().int().min(1).max(10), // <-- coerce
+  yearNumber: z.coerce.number().int().min(1).max(10),
 });
 
 const createSchema = z.object({
   name: z.string().min(1),
   code: z.string().trim().min(1).optional(),
-  ects: z.number().int().optional(),
+  ects: z.coerce.number().int().optional(),
   programs: z.array(programRefSchema).min(1, "Odaberi bar jedan program"),
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   code: z.string().trim().min(1).optional().nullable(),
-  ects: z.number().int().optional().nullable(),
+  ects: z.coerce.number().int().optional().nullable(),
   programs: z.array(programRefSchema).min(1).optional(),
 });
 
@@ -30,9 +30,8 @@ router.get("/", async (_req, res) => {
   const list = await prisma.subject.findMany({
     orderBy: [{ code: "asc" }, { name: "asc" }],
     include: {
-      subjectPrograms: {
-        include: { program: true },
-      },
+      // relation field iz modela Subject
+      subjectPrograms: { include: { program: true } },
     },
   });
   res.json(list);
@@ -46,6 +45,11 @@ router.post("/", async (req, res) => {
   }
   const { name, code, ects, programs } = parsed.data;
 
+  // dedupe po programId (uzmi zadnji yearNumber ako se ponovi)
+  const map = new Map();
+  for (const p of programs) map.set(p.programId, Number(p.yearNumber) || 1);
+  const cleanPrograms = Array.from(map, ([programId, yearNumber]) => ({ programId, yearNumber }));
+
   try {
     const created = await prisma.$transaction(async (tx) => {
       const subj = await tx.subject.create({
@@ -56,12 +60,14 @@ router.post("/", async (req, res) => {
         },
       });
 
-      await tx.subjectProgram.createMany({
-        data: programs.map((p) => ({
+      // **VAŽNO**: naziv modela je SubjectOnProgramYear -> client: subjectOnProgramYear
+      await tx.subjectOnProgramYear.createMany({
+        data: cleanPrograms.map((p) => ({
           subjectId: subj.id,
           programId: p.programId,
           yearNumber: p.yearNumber,
         })),
+        skipDuplicates: true,
       });
 
       return tx.subject.findUnique({
@@ -72,6 +78,8 @@ router.post("/", async (req, res) => {
 
     res.status(201).json(created);
   } catch (e) {
+    if (e?.code === "P2003") return res.status(400).json({ message: "Program ne postoji (FK)", detail: e.message });
+    if (e?.code === "P2002") return res.status(409).json({ message: "Duplikat (subject-program)", detail: e.message });
     res.status(409).json({ message: "DB error", detail: e.message });
   }
 });
@@ -94,6 +102,14 @@ router.put("/:id", async (req, res) => {
   }
   const { name, code, ects, programs } = parsed.data;
 
+  // normalizuj eventualne duplikate u programs
+  let cleanPrograms = null;
+  if (programs) {
+    const map = new Map();
+    for (const p of programs) map.set(p.programId, Number(p.yearNumber) || 1);
+    cleanPrograms = Array.from(map, ([programId, yearNumber]) => ({ programId, yearNumber }));
+  }
+
   try {
     const updated = await prisma.$transaction(async (tx) => {
       const subj = await tx.subject.update({
@@ -105,14 +121,15 @@ router.put("/:id", async (req, res) => {
         },
       });
 
-      if (programs) {
-        await tx.subjectProgram.deleteMany({ where: { subjectId: subj.id } });
-        await tx.subjectProgram.createMany({
-          data: programs.map((p) => ({
+      if (cleanPrograms) {
+        await tx.subjectOnProgramYear.deleteMany({ where: { subjectId: subj.id } });
+        await tx.subjectOnProgramYear.createMany({
+          data: cleanPrograms.map((p) => ({
             subjectId: subj.id,
             programId: p.programId,
             yearNumber: p.yearNumber,
           })),
+          skipDuplicates: true,
         });
       }
 
@@ -124,6 +141,8 @@ router.put("/:id", async (req, res) => {
 
     res.json(updated);
   } catch (e) {
+    if (e?.code === "P2003") return res.status(400).json({ message: "Program ne postoji (FK)", detail: e.message });
+    if (e?.code === "P2002") return res.status(409).json({ message: "Duplikat (subject-program)", detail: e.message });
     res.status(400).json({ message: "Cannot update", detail: e.message });
   }
 });
@@ -131,7 +150,7 @@ router.put("/:id", async (req, res) => {
 // DELETE
 router.delete("/:id", async (req, res) => {
   try {
-    await prisma.subjectProgram.deleteMany({ where: { subjectId: req.params.id } });
+    await prisma.subjectOnProgramYear.deleteMany({ where: { subjectId: req.params.id } });
     await prisma.subject.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   } catch (e) {
