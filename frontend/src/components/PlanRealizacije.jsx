@@ -1,4 +1,3 @@
-// frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet, apiPost, apiPut } from "../lib/api";
 
@@ -23,7 +22,6 @@ export default function PlanRealizacije() {
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // učitaj programe + profesore
   useEffect(() => {
     (async () => {
       try {
@@ -49,15 +47,22 @@ export default function PlanRealizacije() {
       );
       setPlan(data.plan);
       setRows(
-        (data.rows || []).map((r) => ({
-          ...r,
-          _edit: {
-            professorId: r.professorId || "",
-            lectureTotal: r.lectureTotal ?? 0,
-            exerciseTotal: r.exerciseTotal ?? 0,
-            saving: false,
-          },
-        }))
+        (data.rows || []).map((r) => {
+          const L = r.lectureTotal ?? 0;
+          const E = r.exerciseTotal ?? 0;
+          // default 'kind' (P ili V) samo lokalno za UI
+          const kind = L >= E ? "P" : "V";
+          return {
+            ...r,
+            _edit: {
+              professorId: r.professorId || "",
+              lectureTotal: L,
+              exerciseTotal: E,
+              kind,      // "P" ili "V"
+              saving: false,
+            },
+          };
+        })
       );
     } catch (e) {
       setPlan(null);
@@ -137,7 +142,6 @@ export default function PlanRealizacije() {
     }
   }
 
-  // 🔹 Dodaj nastavnika (novi red ispod grupe istog predmeta)
   async function addTeacher(subjectId) {
     if (!plan?.id) return;
     try {
@@ -152,10 +156,10 @@ export default function PlanRealizacije() {
           professorId: newRow.professorId || "",
           lectureTotal: newRow.lectureTotal ?? 0,
           exerciseTotal: newRow.exerciseTotal ?? 0,
+          kind: "P",
           saving: false,
         },
       };
-      // ubaci odmah ispod zadnjeg reda tog predmeta
       setRows((prev) => {
         const idxs = [];
         prev.forEach((x, i) => {
@@ -172,7 +176,7 @@ export default function PlanRealizacije() {
     }
   }
 
-  // Grupisanje po predmetu (radi rowspan)
+  // Grupisanje po predmetu (za rowspan)
   const groups = useMemo(() => {
     const order = [];
     const map = new Map();
@@ -190,7 +194,7 @@ export default function PlanRealizacije() {
     }));
   }, [rows]);
 
-  // proračuni
+  // Totali + procenti RO/VS
   const computed = useMemo(() => {
     const total = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
     rows.forEach((r) => {
@@ -208,7 +212,20 @@ export default function PlanRealizacije() {
       }
     });
     const sum = (o) => o.L + o.E;
-    return { total, sumALL: sum(total.ALL), sumRO: sum(total.RO), sumVS: sum(total.VS) };
+    const sumALL = sum(total.ALL);
+    const sumRO = sum(total.RO);
+    const sumVS = sum(total.VS);
+    // procenti — zaokruži i garantuj 100%
+    let pRO = 0,
+      pVS = 0;
+    if (sumALL > 0) {
+      pRO = Math.round((sumRO * 10000) / sumALL) / 100;
+      pVS = Math.round((sumVS * 10000) / sumALL) / 100;
+      const fix = Math.round((100 - (pRO + pVS)) * 100) / 100;
+      // prilagodi VS da zbir bude 100%
+      pVS = Math.round((pVS + fix) * 100) / 100;
+    }
+    return { total, sumALL, sumRO, sumVS, pRO, pVS };
   }, [rows]);
 
   const currentProgram = programs.find((p) => p.id === selectedProgramId);
@@ -281,15 +298,19 @@ export default function PlanRealizacije() {
               </tr>
             </thead>
             <tbody>
-              {groups.length === 0 ? (
-                <tr>
-                  <td colSpan={11}>
-                    Nema redova za ovu godinu. Klikni{" "}
-                    <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
-                  </td>
-                </tr>
-              ) : (
-                groups.map((g) =>
+              {/** GRUPE PO PREDMETU */}
+              {(() => {
+                if (groups.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={11}>
+                        Nema redova za ovu godinu. Klikni{" "}
+                        <button className="btn" onClick={()=>syncRows(false)}>“Popuni iz predmeta”</button>.
+                      </td>
+                    </tr>
+                  );
+                }
+                return groups.flatMap((g) =>
                   g.rows.map((r, idx) => {
                     const L  = Number(r._edit?.lectureTotal  ?? r.lectureTotal  ?? 0);
                     const E  = Number(r._edit?.exerciseTotal ?? r.exerciseTotal ?? 0);
@@ -302,10 +323,11 @@ export default function PlanRealizacije() {
                     const prof  = profs.find(p=>p.id===profId) || r.professor || null;
                     const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
                     const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
+                    const kind  = r._edit?.kind || "P";
 
                     return (
                       <tr key={r.id}>
-                        {/* subject cell samo jednom, spojen preko svih redova grupe */}
+                        {/* Subject cell spojen preko svih redova grupe */}
                         {idx === 0 && (
                           <td rowSpan={g.rows.length}>
                             <div style={{fontWeight:600}}>{subj.name}</div>
@@ -315,7 +337,20 @@ export default function PlanRealizacije() {
                             </div>
                           </td>
                         )}
-                        <td>P/V</td>
+
+                        {/* P/V izbor */}
+                        <td style={{minWidth:70}}>
+                          <select
+                            className="input small"
+                            value={kind}
+                            onChange={(e)=>changeRow(r.id,{ kind: e.target.value })}
+                          >
+                            <option value="P">P</option>
+                            <option value="V">V</option>
+                          </select>
+                        </td>
+
+                        {/* Nastavnik */}
                         <td style={{minWidth:220}}>
                           <select className="input" value={String(profId)} onChange={(e)=>changeRow(r.id,{ professorId: e.target.value })}>
                             <option value="">— odaberi —</option>
@@ -326,18 +361,43 @@ export default function PlanRealizacije() {
                             ))}
                           </select>
                         </td>
+
+                        {/* Angažman */}
                         <td>{anga}</td>
-                        <td><input className="input small" value={L} onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
-                        <td><input className="input small" value={E} onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })} inputMode="numeric" style={{maxWidth:90}} /></td>
+
+                        {/* Ukupno (količina) */}
+                        <td>
+                          <input
+                            className="input small"
+                            value={L}
+                            onChange={e=>changeRow(r.id,{ lectureTotal: e.target.value })}
+                            inputMode="numeric"
+                            style={{maxWidth:90, opacity: kind==="P" ? 1 : 0.6}}
+                            disabled={kind !== "P"}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input small"
+                            value={E}
+                            onChange={e=>changeRow(r.id,{ exerciseTotal: e.target.value })}
+                            inputMode="numeric"
+                            style={{maxWidth:90, opacity: kind==="V" ? 1 : 0.6}}
+                            disabled={kind !== "V"}
+                          />
+                        </td>
                         <td>{U}</td>
+
+                        {/* Sedmična pokrivenost (koeficijenti) — ostaje u redovima */}
                         <td>{Lw.toFixed(2)}</td>
                         <td>{Ew.toFixed(2)}</td>
                         <td>{Uw.toFixed(2)}</td>
+
+                        {/* Akcije */}
                         <td style={{whiteSpace:"nowrap", display:"flex", gap:6}}>
                           <button className="btn" onClick={()=>saveRow(r)} disabled={r._edit?.saving}>
                             {r._edit?.saving ? "..." : "Save"}
                           </button>
-                          {/* dugme se prikazuje na prvom redu grupe (logično mjesto uz spojen subject) */}
                           {idx === 0 && (
                             <button className="btn" title="Dodaj nastavnika za ovaj predmet" onClick={()=>addTeacher(g.subjectId)}>
                               Dodaj nastavnika
@@ -347,17 +407,16 @@ export default function PlanRealizacije() {
                       </tr>
                     );
                   })
-                )
-              )}
-              {/* Totali */}
+                );
+              })()}
+
+              {/* ===== Footer: Zbrojevi (količina), bez sedmičnih koeficijenata ===== */}
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td>{(computed.total.RO.L/15).toFixed(2)}</td>
-                <td>{(computed.total.RO.E/15).toFixed(2)}</td>
-                <td>{(computed.sumRO/15).toFixed(2)}</td>
+                <td colSpan={3}></td>
                 <td></td>
               </tr>
               <tr>
@@ -365,9 +424,7 @@ export default function PlanRealizacije() {
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td>{(computed.total.VS.L/15).toFixed(2)}</td>
-                <td>{(computed.total.VS.E/15).toFixed(2)}</td>
-                <td>{(computed.sumVS/15).toFixed(2)}</td>
+                <td colSpan={3}></td>
                 <td></td>
               </tr>
               <tr>
@@ -375,9 +432,27 @@ export default function PlanRealizacije() {
                 <td>{computed.total.ALL.L}</td>
                 <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
-                <td>{(computed.total.ALL.L/15).toFixed(2)}</td>
-                <td>{(computed.total.ALL.E/15).toFixed(2)}</td>
-                <td>{(computed.sumALL/15).toFixed(2)}</td>
+                <td colSpan={3}></td>
+                <td></td>
+              </tr>
+
+              {/* ===== Footer: Odnos RO/VS (postoci) ===== */}
+              <tr>
+                <td colSpan={6} style={{textAlign:"right", fontWeight:600}}>Udio RO (%):</td>
+                <td>{computed.pRO.toFixed(2)}%</td>
+                <td colSpan={3}></td>
+                <td></td>
+              </tr>
+              <tr>
+                <td colSpan={6} style={{textAlign:"right", fontWeight:600}}>Udio VS (%):</td>
+                <td>{computed.pVS.toFixed(2)}%</td>
+                <td colSpan={3}></td>
+                <td></td>
+              </tr>
+              <tr>
+                <td colSpan={6} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
+                <td>100.00%</td>
+                <td colSpan={3}></td>
                 <td></td>
               </tr>
             </tbody>
