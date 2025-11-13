@@ -50,7 +50,6 @@ export default function PlanRealizacije() {
         (data.rows || []).map((r) => {
           const L = r.lectureTotal ?? 0;
           const E = r.exerciseTotal ?? 0;
-          // default 'kind' (P ili V) samo lokalno za UI
           const kind = L >= E ? "P" : "V";
           return {
             ...r,
@@ -58,7 +57,7 @@ export default function PlanRealizacije() {
               professorId: r.professorId || "",
               lectureTotal: L,
               exerciseTotal: E,
-              kind,      // "P" ili "V"
+              kind, // "P" ili "V"
               saving: false,
             },
           };
@@ -215,14 +214,13 @@ export default function PlanRealizacije() {
     const sumALL = sum(total.ALL);
     const sumRO = sum(total.RO);
     const sumVS = sum(total.VS);
-    // procenti — zaokruži i garantuj 100%
+
     let pRO = 0,
       pVS = 0;
     if (sumALL > 0) {
       pRO = Math.round((sumRO * 10000) / sumALL) / 100;
       pVS = Math.round((sumVS * 10000) / sumALL) / 100;
       const fix = Math.round((100 - (pRO + pVS)) * 100) / 100;
-      // prilagodi VS da zbir bude 100%
       pVS = Math.round((pVS + fix) * 100) / 100;
     }
     return { total, sumALL, sumRO, sumVS, pRO, pVS };
@@ -298,7 +296,7 @@ export default function PlanRealizacije() {
               </tr>
             </thead>
             <tbody>
-              {/** GRUPE PO PREDMETU */}
+              {/* Grupe po predmetu */}
               {(() => {
                 if (groups.length === 0) {
                   return (
@@ -321,7 +319,7 @@ export default function PlanRealizacije() {
                     const joint = (subj.subjectPrograms || []).some(sp => sp.programId !== selectedProgramId);
                     const profId= r._edit?.professorId ?? r.professorId ?? "";
                     const prof  = profs.find(p=>p.id===profId) || r.professor || null;
-                    const anga  = prof?.engagement ? ENG_MAP[prof.engagement] : "-";
+                    const anga  = prof?.engagement ? ENG_MAP[professorEngagement(prof)] : "-";
                     const title = prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "";
                     const kind  = r._edit?.kind || "P";
 
@@ -338,12 +336,13 @@ export default function PlanRealizacije() {
                           </td>
                         )}
 
-                        {/* P/V izbor */}
-                        <td style={{minWidth:70}}>
+                        {/* P/V uži select */}
+                        <td>
                           <select
                             className="input small"
                             value={kind}
                             onChange={(e)=>changeRow(r.id,{ kind: e.target.value })}
+                            style={{ width: 56, padding: "2px 6px" }}
                           >
                             <option value="P">P</option>
                             <option value="V">V</option>
@@ -388,7 +387,7 @@ export default function PlanRealizacije() {
                         </td>
                         <td>{U}</td>
 
-                        {/* Sedmična pokrivenost (koeficijenti) — ostaje u redovima */}
+                        {/* Sedmična pokrivenost (ostaje u redovima) */}
                         <td>{Lw.toFixed(2)}</td>
                         <td>{Ew.toFixed(2)}</td>
                         <td>{Uw.toFixed(2)}</td>
@@ -410,13 +409,14 @@ export default function PlanRealizacije() {
                 );
               })()}
 
-              {/* ===== Footer: Zbrojevi (količina), bez sedmičnih koeficijenata ===== */}
+              {/* ===== Footer: totals + udio u istim redovima, pa Ukupno 100% ===== */}
               <tr>
                 <td colSpan={4} style={{textAlign:"right", fontWeight:600}}>Ukupno iz radnog odnosa (RO):</td>
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td colSpan={3}></td>
+                <td colSpan={2} style={{textAlign:"right", fontWeight:600}}>Udio RO (%):</td>
+                <td>{computed.pRO.toFixed(2)}%</td>
                 <td></td>
               </tr>
               <tr>
@@ -424,7 +424,8 @@ export default function PlanRealizacije() {
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td colSpan={3}></td>
+                <td colSpan={2} style={{textAlign:"right", fontWeight:600}}>Udio VS (%):</td>
+                <td>{computed.pVS.toFixed(2)}%</td>
                 <td></td>
               </tr>
               <tr>
@@ -435,24 +436,10 @@ export default function PlanRealizacije() {
                 <td colSpan={3}></td>
                 <td></td>
               </tr>
-
-              {/* ===== Footer: Odnos RO/VS (postoci) ===== */}
               <tr>
-                <td colSpan={6} style={{textAlign:"right", fontWeight:600}}>Udio RO (%):</td>
-                <td>{computed.pRO.toFixed(2)}%</td>
-                <td colSpan={3}></td>
-                <td></td>
-              </tr>
-              <tr>
-                <td colSpan={6} style={{textAlign:"right", fontWeight:600}}>Udio VS (%):</td>
-                <td>{computed.pVS.toFixed(2)}%</td>
-                <td colSpan={3}></td>
-                <td></td>
-              </tr>
-              <tr>
-                <td colSpan={6} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
+                <td colSpan={7}></td>
+                <td colSpan={2} style={{textAlign:"right", fontWeight:700}}>Ukupno:</td>
                 <td>100.00%</td>
-                <td colSpan={3}></td>
                 <td></td>
               </tr>
             </tbody>
@@ -461,4 +448,11 @@ export default function PlanRealizacije() {
       )}
     </div>
   );
+}
+
+/** helper */
+function professorEngagement(prof) {
+  return prof?.engagement === "EMPLOYED" || prof?.engagement === "EXTERNAL"
+    ? prof.engagement
+    : undefined;
 }
