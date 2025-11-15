@@ -18,6 +18,33 @@ const FACULTY_BY_CODE = {
   EP: "Biotehnički fakultet",
 };
 
+const TITLE_MAP = {
+  PRACTITIONER: "Stručnjak iz prakse",
+  ASSISTANT: "Asistent",
+  SENIOR_ASSISTANT: "Viši asistent",
+  ASSISTANT_PROFESSOR: "Docent",
+  ASSOCIATE_PROFESSOR: "Vanr. prof.",
+  FULL_PROFESSOR: "Red. prof.",
+  PROFESSOR_EMERITUS: "Prof. emeritus",
+};
+const ENG_MAP = {
+  EMPLOYED: "RO",   // radni odnos
+  EXTERNAL: "VS",   // vanjski saradnik
+};
+
+// Semestar (ZIMSKI/LJETNI) + godina -> rimski broj
+function mapSemesterToRoman(yearNumber, semEnum) {
+  const y = Number(yearNumber || 0);
+  const zimski = semEnum === "ZIMSKI";
+  switch (y) {
+    case 1: return zimski ? "I" : "II";
+    case 2: return zimski ? "III" : "IV";
+    case 3: return zimski ? "V" : "VI";
+    case 4: return zimski ? "VII" : "VIII";
+    default: return "";
+  }
+}
+
 router.get("/health", (_req, res) => res.json({ ok: true, scope: "planrealizacije" }));
 
 // Idempotent seed standardnih programa
@@ -314,4 +341,99 @@ router.get("/", async (req, res) => {
   });
 
   res.json(plans);
+});
+
+router.get("/teacher-load", async (_req, res) => {
+  try {
+    // Uzimamo samo redove gdje je profesor dodijeljen
+    const rows = await prisma.pRNRow.findMany({
+      where: { professorId: { not: null } },
+      include: {
+        professor: true,
+        subject: {
+          include: {
+            subjectPrograms: true, // SubjectOnProgramYear[]
+          },
+        },
+        plan: {
+          include: {
+            program: true, // StudyProgram
+          },
+        },
+      },
+    });
+
+    const mapped = rows.map((r) => {
+      const prof = r.professor;
+      const program = r.plan?.program;
+      const yearNumber = r.plan?.yearNumber;
+
+      // pronađi SubjectOnProgramYear za taj program + godinu
+      const spLink = r.subject.subjectPrograms.find(
+        (sp) => sp.programId === program?.id && sp.yearNumber === yearNumber
+      );
+
+      const semEnum = spLink?.semester || "ZIMSKI"; // fallback
+      const semRoman = mapSemesterToRoman(yearNumber, semEnum);
+
+      const lecture = Number(r.lectureHours ?? 0);
+      const exercise = Number(r.exerciseHours ?? 0);
+
+      const totalPV = lecture + exercise;                 // P + V
+      const totalWeighted = lecture + exercise * 0.5;     // P + 0.5*V
+      const weekly = totalWeighted / 15;                  // sedmično
+
+      const programCode = program?.code || "";
+
+      return {
+        rowId: r.id,
+        professorId: prof?.id || null,
+        professorName: prof?.name || "",
+        professorTitle: prof?.title || null,
+        professorTitleLabel: prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "",
+        engagement: prof?.engagement || null,
+        engagementLabel: prof?.engagement ? (ENG_MAP[prof.engagement] || prof.engagement) : "",
+        subjectName: r.subject.name,
+        subjectCode: r.subject.code || null,
+
+        programCode,
+        spFIR: programCode === "FIR" ? "x" : "",
+        spRI:  programCode === "RI"  ? "x" : "",
+        spTUG: programCode === "TUG" ? "x" : "",
+        spSMDP: programCode === "SMDP" ? "x" : "",
+        spEP:  programCode === "EP"  ? "x" : "",
+
+        yearNumber,
+        semester: semRoman,
+        lectureHours: lecture,
+        exerciseHours: exercise,
+        totalPV,
+        totalWeighted,
+        weekly,
+
+        // ovdje kasnije možeš ugraditi računanje prema normi, kad definišeš norme po profesoru
+        opterecenjePremaNormama: null,
+      };
+    });
+
+    // sortiranje: prvo po imenu nastavnika, pa programu, godini, semestru, predmetu
+    mapped.sort((a, b) => {
+      const nameCmp = (a.professorName || "").localeCompare(b.professorName || "", "bs");
+      if (nameCmp !== 0) return nameCmp;
+      const progCmp = (a.programCode || "").localeCompare(b.programCode || "");
+      if (progCmp !== 0) return progCmp;
+      if (a.yearNumber !== b.yearNumber) return (a.yearNumber || 0) - (b.yearNumber || 0);
+      const semCmp = (a.semester || "").localeCompare(b.semester || "");
+      if (semCmp !== 0) return semCmp;
+      return (a.subjectName || "").localeCompare(b.subjectName || "", "bs");
+    });
+
+    res.json({ rows: mapped });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({
+      message: "Teacher load error",
+      detail: String(e?.message || e),
+    });
+  }
 });

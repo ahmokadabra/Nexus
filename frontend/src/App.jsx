@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import PlanRealizacije from "./components/PlanRealizacije.jsx";
 import DatabasePage from "./pages/DatabasePage";
+import TeacherLoad from "./components/TeacherLoad.jsx"; // ⬅️ DODANO
 
 // Logo se čita iz /public/logo.svg
 const Logo = ({ size = 120 }) => (
@@ -82,13 +83,7 @@ export default function App() {
 
         {active === "plan" && <PlanRealizacije />}
 
-        {active === "opterećenje" && (
-          <div className="card">
-            <p style={{ color: "var(--muted)" }}>
-              Ovdje će ići “Opterećenje nastavnika”. (Placeholder)
-            </p>
-          </div>
-        )}
+        {active === "opterećenje" && <TeacherLoad />}
 
         {active === "raspored" && (
           <div className="card">
