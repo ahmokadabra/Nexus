@@ -40,7 +40,8 @@ export default function App() {
               marginBottom: 16,
             }}
           >
-            <Logo size={42} />
+            {/* ⬅️ logo u headeru povećan x2 (42 -> 84) */}
+            <Logo size={84} />
             <h1 style={{ margin: 0, fontSize: 22 }}>
               {active === "db"
                 ? "Baza podataka"
@@ -55,22 +56,34 @@ export default function App() {
           </header>
         )}
 
-        {/* Početni ekran = logo + tekst, centrirano */}
+        {/* Početni ekran = logo + tekst, sa malim razmakom gore/dole */}
         {!active && (
           <div
             style={{
-              minHeight: "70vh",
-              display: "grid",
-              placeItems: "center",
+              paddingTop: 16,      // mali razmak gore
+              paddingBottom: 16,   // mali razmak dole
+              display: "flex",
+              justifyContent: "center",
             }}
           >
             <div style={{ textAlign: "center" }}>
-              {/* ⬇️ OVDJE JE PROMJENA – 6x veći nego prije (960 umjesto 160) */}
+              {/* veliki logo, veličina ti je već odgovarala */}
               <Logo size={960} />
-              <div style={{ marginTop: 12, fontSize: 18, color: "var(--muted)" }}>
+              <div
+                style={{
+                  marginTop: 8,     // manji razmak ispod loga
+                  fontSize: 18,
+                  color: "var(--muted)",
+                }}
+              >
                 Dobrodošli u Nexus
               </div>
-              <div style={{ marginTop: 8, color: "var(--muted)" }}>
+              <div
+                style={{
+                  marginTop: 4,     // još manji razmak do drugog teksta
+                  color: "var(--muted)",
+                }}
+              >
                 Odaberite sekciju iz lijevog sidebar-a
               </div>
             </div>
