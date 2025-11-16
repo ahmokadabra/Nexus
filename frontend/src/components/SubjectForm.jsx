@@ -12,6 +12,7 @@ export default function SubjectForm() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [ects, setEcts] = useState("");
+  const [isElective, setIsElective] = useState(false); // ⬅️ NOVO
 
   // program picker state (add form)
   const [programs, setPrograms] = useState([]); // [{programId, yearNumber, semester}]
@@ -36,6 +37,7 @@ export default function SubjectForm() {
   const [eCode, setECode] = useState("");
   const [eName, setEName] = useState("");
   const [eEcts, setEEcts] = useState("");
+  const [eIsElective, setEIsElective] = useState(false); // ⬅️ NOVO
 
   // editor za programe u inline modu
   const [ePrograms, setEPrograms] = useState([]); // [{programId, yearNumber, semester}]
@@ -61,10 +63,16 @@ export default function SubjectForm() {
     }
   }
 
-  useEffect(() => { fetchList(); fetchPrograms(); }, []);
+  useEffect(() => {
+    fetchList();
+    fetchPrograms();
+  }, []);
 
   function resetAdd() {
-    setCode(""); setName(""); setEcts("");
+    setCode("");
+    setName("");
+    setEcts("");
+    setIsElective(false); // ⬅️ NOVO
     setPrograms([]);
     setPickerProgramId("");
     setPickerYear(1);
@@ -80,14 +88,34 @@ export default function SubjectForm() {
     const y = Number(pickerYear) || 1;
     const sem = pickerSemester || "ZIMSKI";
     const key = `${pickerProgramId}:${y}:${sem}`;
-    if (programs.some(p => `${p.programId}:${p.yearNumber}:${p.semester}` === key)) {
-      setMsg({ type: "err", text: "Veza Program+Godina+Semestar već postoji" });
+    if (
+      programs.some(
+        (p) =>
+          `${p.programId}:${p.yearNumber}:${p.semester}` === key
+      )
+    ) {
+      setMsg({
+        type: "err",
+        text: "Veza Program+Godina+Semestar već postoji",
+      });
       return;
     }
-    setPrograms(p => [...p, { programId: pickerProgramId, yearNumber: y, semester: sem }]);
+    setPrograms((p) => [
+      ...p,
+      { programId: pickerProgramId, yearNumber: y, semester: sem },
+    ]);
   }
   function removeProgramFromDraft(pid, y, sem) {
-    setPrograms(p => p.filter(x => !(x.programId === pid && Number(x.yearNumber) === Number(y) && x.semester === sem)));
+    setPrograms((p) =>
+      p.filter(
+        (x) =>
+          !(
+            x.programId === pid &&
+            Number(x.yearNumber) === Number(y) &&
+            x.semester === sem
+          )
+      )
+    );
   }
 
   async function submit(e) {
@@ -95,14 +123,18 @@ export default function SubjectForm() {
     setMsg(null);
     try {
       if (programs.length === 0) {
-        setMsg({ type: "err", text: "Dodaj bar jedan studijski program" });
+        setMsg({
+          type: "err",
+          text: "Dodaj bar jedan studijski program",
+        });
         return;
       }
       const payload = {
         name: name.trim(),
         ...(code.trim() ? { code: code.trim() } : {}),
         ...(ects ? { ects: Number(ects) } : {}),
-        programs: programs.map(p => ({
+        isElective, // ⬅️ NOVO
+        programs: programs.map((p) => ({
           programId: p.programId,
           yearNumber: Number(p.yearNumber) || 1,
           semester: p.semester || "ZIMSKI",
@@ -122,8 +154,9 @@ export default function SubjectForm() {
     setECode(s.code || "");
     setEName(s.name || "");
     setEEcts(s.ects ?? "");
+    setEIsElective(!!s.isElective); // ⬅️ NOVO
     // mapiraj postojeće veze (+ semester)
-    const mapped = (s.subjectPrograms || []).map(sp => ({
+    const mapped = (s.subjectPrograms || []).map((sp) => ({
       programId: sp.programId,
       yearNumber: Number(sp.yearNumber) || 1,
       semester: sp.semester || "ZIMSKI",
@@ -139,6 +172,7 @@ export default function SubjectForm() {
     setEPickerProgramId("");
     setEPickerYear(1);
     setEPickerSemester("ZIMSKI");
+    setEIsElective(false); // ⬅️ NOVO
   }
 
   function eAddOrUpdateProgram() {
@@ -149,14 +183,32 @@ export default function SubjectForm() {
     const y = Number(ePickerYear) || 1;
     const sem = ePickerSemester || "ZIMSKI";
     const key = `${ePickerProgramId}:${y}:${sem}`;
-    setEPrograms(prev => {
+    setEPrograms((prev) => {
       // ako već postoji tačno ista kombinacija — ne dupliraj
-      if (prev.some(p => `${p.programId}:${p.yearNumber}:${p.semester}` === key)) return prev;
-      return [...prev, { programId: ePickerProgramId, yearNumber: y, semester: sem }];
+      if (
+        prev.some(
+          (p) =>
+            `${p.programId}:${p.yearNumber}:${p.semester}` === key
+        )
+      )
+        return prev;
+      return [
+        ...prev,
+        { programId: ePickerProgramId, yearNumber: y, semester: sem },
+      ];
     });
   }
   function eRemoveProgram(pid, y, sem) {
-    setEPrograms(prev => prev.filter(p => !(p.programId === pid && Number(p.yearNumber) === Number(y) && p.semester === sem)));
+    setEPrograms((prev) =>
+      prev.filter(
+        (p) =>
+          !(
+            p.programId === pid &&
+            Number(p.yearNumber) === Number(y) &&
+            p.semester === sem
+          )
+      )
+    );
   }
 
   async function saveEdit(id) {
@@ -165,14 +217,18 @@ export default function SubjectForm() {
         ...(eName.trim() ? { name: eName.trim() } : {}),
         ...(eCode.trim() ? { code: eCode.trim() } : { code: null }),
         ...(eEcts !== "" ? { ects: Number(eEcts) } : { ects: null }),
-        programs: ePrograms.map(p => ({
+        isElective: eIsElective, // ⬅️ NOVO
+        programs: ePrograms.map((p) => ({
           programId: p.programId,
           yearNumber: Number(p.yearNumber) || 1,
           semester: p.semester || "ZIMSKI",
         })),
       };
       if (!payload.programs || payload.programs.length === 0) {
-        setMsg({ type: "err", text: "Predmet mora imati bar jedan program" });
+        setMsg({
+          type: "err",
+          text: "Predmet mora imati bar jedan program",
+        });
         return;
       }
       await apiPut(`/api/subjects/${id}`, payload);
@@ -197,15 +253,22 @@ export default function SubjectForm() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return list;
-    return list.filter(s => {
+    return list.filter((s) => {
       const programsBag = (s.subjectPrograms || [])
-        .map(sp => `${sp.program?.name || ""} ${sp.program?.code || ""} ${sp.yearNumber || ""} ${sp.semester || ""}`)
+        .map(
+          (sp) =>
+            `${sp.program?.name || ""} ${sp.program?.code || ""} ${
+              sp.yearNumber || ""
+            } ${sp.semester || ""}`
+        )
         .join(" ")
         .toLowerCase();
       return (
         (s.code || "").toLowerCase().includes(q) ||
         (s.name || "").toLowerCase().includes(q) ||
-        String(s.ects ?? "").toLowerCase().includes(q) ||
+        String(s.ects ?? "")
+          .toLowerCase()
+          .includes(q) ||
         programsBag.includes(q)
       );
     });
@@ -214,11 +277,15 @@ export default function SubjectForm() {
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const dir = sortDir === "asc" ? 1 : -1;
-    arr.sort((a,b) => {
+    arr.sort((a, b) => {
       const va = a[sortKey] ?? "";
       const vb = b[sortKey] ?? "";
-      if (sortKey === "ects") return ((va||0) - (vb||0)) * dir;
-      return String(va).localeCompare(String(vb), undefined, { sensitivity:"base" }) * dir;
+      if (sortKey === "ects") return ((va || 0) - (vb || 0)) * dir;
+      return (
+        String(va).localeCompare(String(vb), undefined, {
+          sensitivity: "base",
+        }) * dir
+      );
     });
     return arr;
   }, [filtered, sortKey, sortDir]);
@@ -226,67 +293,184 @@ export default function SubjectForm() {
   const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageItems = useMemo(() => {
-    const start = (safePage-1) * pageSize;
-    return sorted.slice(start, start+pageSize);
+    const start = (safePage - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
   }, [sorted, safePage]);
 
   function toggleSort(key) {
-    if (sortKey === key) setSortDir(d => d==="asc"?"desc":"asc");
-    else { setSortKey(key); setSortDir("asc"); }
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   }
 
   const labelForProgram = (programId) => {
-    const pr = availablePrograms.find(ap => ap.id === programId);
+    const pr = availablePrograms.find((ap) => ap.id === programId);
     return pr ? `${pr.code ? pr.code : pr.name}` : programId;
   };
 
-  const semLabel = (sem) => sem === "LJETNI" ? "ljetni" : "zimski";
+  const semLabel = (sem) => (sem === "LJETNI" ? "ljetni" : "zimski");
 
   return (
     <div>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <h2>Subjects</h2>
-        <div className="form-row" style={{gap:8}}>
-          <input className="input" placeholder="Pretraga…" value={query} onChange={e=>{ setQuery(e.target.value); setPage(1); }} />
-          <button className="btn" onClick={fetchList}>Refresh</button>
+        <div className="form-row" style={{ gap: 8 }}>
+          <input
+            className="input"
+            placeholder="Pretraga…"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
+          />
+          <button className="btn" onClick={fetchList}>
+            Refresh
+          </button>
         </div>
       </div>
 
       {/* add */}
       <form onSubmit={submit}>
         <div className="form-row">
-          <input className="input" placeholder="Name *" value={name} onChange={e=>setName(e.target.value)} required />
-          <input className="input small" placeholder="Code (opcionalno)" value={code} onChange={e=>setCode(e.target.value)} />
-          <input className="input small" placeholder="ECTS (opcionalno)" value={ects} onChange={e=>setEcts(e.target.value)} inputMode="numeric" />
+          <input
+            className="input"
+            placeholder="Name *"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <input
+            className="input small"
+            placeholder="Code (opcionalno)"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+          <input
+            className="input small"
+            placeholder="ECTS (opcionalno)"
+            value={ects}
+            onChange={(e) => setEcts(e.target.value)}
+            inputMode="numeric"
+          />
+          {/* ⬇️ NOVO: tip predmeta */}
+          <select
+            className="input small"
+            value={isElective ? "E" : "O"}
+            onChange={(e) => setIsElective(e.target.value === "E")}
+          >
+            <option value="O">Obavezni</option>
+            <option value="E">Izborni</option>
+          </select>
         </div>
 
-        <div style={{marginTop:8, padding:8, border:"1px dashed #555", borderRadius:8}}>
+        <div
+          style={{
+            marginTop: 8,
+            padding: 8,
+            border: "1px dashed #555",
+            borderRadius: 8,
+          }}
+        >
           <strong>Studijski programi (bar 1) + godina + semestar</strong>
-          <div className="form-row" style={{marginTop:8, gap:8, alignItems:"center"}}>
-            <select className="input" value={pickerProgramId} onChange={e=>setPickerProgramId(e.target.value)}>
+          <div
+            className="form-row"
+            style={{ marginTop: 8, gap: 8, alignItems: "center" }}
+          >
+            <select
+              className="input"
+              value={pickerProgramId}
+              onChange={(e) => setPickerProgramId(e.target.value)}
+            >
               <option value="">— Odaberi program —</option>
-              {availablePrograms.map(p => (
-                <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
+              {availablePrograms.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.code ? ` (${p.code})` : ""}
+                </option>
               ))}
             </select>
-            <input className="input small" type="number" min={1} max={10} value={pickerYear} onChange={e=>setPickerYear(e.target.value)} style={{width:90}} />
-            <select className="input small" value={pickerSemester} onChange={e=>setPickerSemester(e.target.value)} style={{width:120}}>
-              {SEM_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <input
+              className="input small"
+              type="number"
+              min={1}
+              max={10}
+              value={pickerYear}
+              onChange={(e) => setPickerYear(e.target.value)}
+              style={{ width: 90 }}
+            />
+            <select
+              className="input small"
+              value={pickerSemester}
+              onChange={(e) => setPickerSemester(e.target.value)}
+              style={{ width: 120 }}
+            >
+              {SEM_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
-            <button type="button" className="btn" onClick={addProgramToDraft}>Add</button>
+            <button
+              type="button"
+              className="btn"
+              onClick={addProgramToDraft}
+            >
+              Add
+            </button>
           </div>
 
           {programs.length > 0 && (
-            <ul style={{marginTop:8, display:"flex", gap:8, flexWrap:"wrap"}}>
-              {programs.map(p => {
-                const pr = availablePrograms.find(ap => ap.id === p.programId);
+            <ul
+              style={{
+                marginTop: 8,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {programs.map((p) => {
+                const pr = availablePrograms.find(
+                  (ap) => ap.id === p.programId
+                );
                 const label = pr
-                  ? `${pr.name}${pr.code ? ` (${pr.code})` : ""} — ${p.yearNumber}. godina — ${semLabel(p.semester)}`
+                  ? `${pr.name}${
+                      pr.code ? ` (${pr.code})` : ""
+                    } — ${p.yearNumber}. godina — ${semLabel(
+                      p.semester
+                    )}`
                   : p.programId;
                 return (
-                  <li key={`${p.programId}:${p.yearNumber}:${p.semester}`} style={{padding:"4px 8px", border:"1px solid #444", borderRadius:999}}>
+                  <li
+                    key={`${p.programId}:${p.yearNumber}:${p.semester}`}
+                    style={{
+                      padding: "4px 8px",
+                      border: "1px solid #444",
+                      borderRadius: 999,
+                    }}
+                  >
                     {label}{" "}
-                    <button type="button" className="btn" onClick={()=>removeProgramFromDraft(p.programId, p.yearNumber, p.semester)}>×</button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        removeProgramFromDraft(
+                          p.programId,
+                          p.yearNumber,
+                          p.semester
+                        )
+                      }
+                    >
+                      ×
+                    </button>
                   </li>
                 );
               })}
@@ -294,103 +478,275 @@ export default function SubjectForm() {
           )}
         </div>
 
-        <div style={{marginTop:8}}>
-          <button className="btn" type="submit">Save</button>
+        <div style={{ marginTop: 8 }}>
+          <button className="btn" type="submit">
+            Save
+          </button>
         </div>
-        {msg && <div className={msg.type==="ok"?"success":"error"}>{msg.text}</div>}
+        {msg && (
+          <div className={msg.type === "ok" ? "success" : "error"}>
+            {msg.text}
+          </div>
+        )}
       </form>
 
       <h3>All Subjects</h3>
       <table className="table">
         <thead>
           <tr>
-            <th onClick={()=>toggleSort("code")} style={{cursor:"pointer"}}>Code</th>
-            <th onClick={()=>toggleSort("name")} style={{cursor:"pointer"}}>Name</th>
-            <th onClick={()=>toggleSort("ects")} style={{cursor:"pointer"}}>ECTS</th>
+            <th
+              onClick={() => toggleSort("code")}
+              style={{ cursor: "pointer" }}
+            >
+              Code
+            </th>
+            <th
+              onClick={() => toggleSort("name")}
+              style={{ cursor: "pointer" }}
+            >
+              Name
+            </th>
+            <th>Tip</th> {/* ⬅️ NOVO */}
+            <th
+              onClick={() => toggleSort("ects")}
+              style={{ cursor: "pointer" }}
+            >
+              ECTS
+            </th>
             <th>Programs</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {pageItems.length === 0 ? (
-            <tr><td colSpan="5">[]</td></tr>
-          ) : pageItems.map(s => (
-            <tr key={s.id}>
-              {editId === s.id ? (
-                <>
-                  <td><input className="input small" value={eCode} onChange={e=>setECode(e.target.value)} /></td>
-                  <td><input className="input" value={eName} onChange={e=>setEName(e.target.value)} /></td>
-                  <td><input className="input small" value={eEcts} onChange={e=>setEEcts(e.target.value)} inputMode="numeric" /></td>
-                  <td>
-                    {/* editor za programe */}
-                    <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" }}>
-                      <select className="input" value={ePickerProgramId} onChange={e=>setEPickerProgramId(e.target.value)}>
-                        <option value="">— Program —</option>
-                        {availablePrograms.map(p => (
-                          <option key={p.id} value={p.id}>{p.code || p.name}</option>
-                        ))}
-                      </select>
+            <tr>
+              <td colSpan="6">[]</td>
+            </tr>
+          ) : (
+            pageItems.map((s) => (
+              <tr key={s.id}>
+                {editId === s.id ? (
+                  <>
+                    <td>
                       <input
                         className="input small"
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={ePickerYear}
-                        onChange={e=>setEPickerYear(e.target.value)}
-                        style={{width:90}}
+                        value={eCode}
+                        onChange={(e) => setECode(e.target.value)}
                       />
-                      <select className="input small" value={ePickerSemester} onChange={e=>setEPickerSemester(e.target.value)} style={{width:120}}>
-                        {SEM_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </td>
+                    <td>
+                      <input
+                        className="input"
+                        value={eName}
+                        onChange={(e) => setEName(e.target.value)}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        className="input small"
+                        value={eIsElective ? "E" : "O"}
+                        onChange={(e) =>
+                          setEIsElective(e.target.value === "E")
+                        }
+                      >
+                        <option value="O">Obavezni</option>
+                        <option value="E">Izborni</option>
                       </select>
-                      <button type="button" className="btn" onClick={eAddOrUpdateProgram}>Add</button>
-                    </div>
+                    </td>
+                    <td>
+                      <input
+                        className="input small"
+                        value={eEcts}
+                        onChange={(e) => setEEcts(e.target.value)}
+                        inputMode="numeric"
+                      />
+                    </td>
+                    <td>
+                      {/* editor za programe */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <select
+                          className="input"
+                          value={ePickerProgramId}
+                          onChange={(e) =>
+                            setEPickerProgramId(e.target.value)
+                          }
+                        >
+                          <option value="">— Program —</option>
+                          {availablePrograms.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.code || p.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="input small"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={ePickerYear}
+                          onChange={(e) =>
+                            setEPickerYear(e.target.value)
+                          }
+                          style={{ width: 90 }}
+                        />
+                        <select
+                          className="input small"
+                          value={ePickerSemester}
+                          onChange={(e) =>
+                            setEPickerSemester(e.target.value)
+                          }
+                          style={{ width: 120 }}
+                        >
+                          {SEM_OPTS.map((o) => (
+                            <option
+                              key={o.value}
+                              value={o.value}
+                            >
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={eAddOrUpdateProgram}
+                        >
+                          Add
+                        </button>
+                      </div>
 
-                    {ePrograms.length > 0 && (
-                      <ul style={{marginTop:6, display:"flex", gap:6, flexWrap:"wrap"}}>
-                        {ePrograms.map(p => (
-                          <li key={`${p.programId}:${p.yearNumber}:${p.semester}`} style={{padding:"2px 8px", border:"1px solid #444", borderRadius:999}}>
-                            {labelForProgram(p.programId)} — {p.yearNumber}. g. — {semLabel(p.semester)}
-                            {" "}
-                            <button type="button" className="btn" onClick={()=>eRemoveProgram(p.programId, p.yearNumber, p.semester)}>×</button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </td>
-                  <td style={{whiteSpace:"nowrap"}}>
-                    <button className="btn" onClick={()=>saveEdit(s.id)}>Save</button>{" "}
-                    <button className="btn" onClick={cancelEdit}>Cancel</button>
-                  </td>
-                </>
-              ) : (
-                <>
-                  <td>{s.code ?? "-"}</td>
-                  <td>{s.name}</td>
-                  <td>{s.ects ?? "-"}</td>
-                  <td>
-                    {(s.subjectPrograms || []).length === 0 ? "-" :
-                      (s.subjectPrograms || []).map(sp => (
-                        <div key={`${sp.programId}:${sp.yearNumber}:${sp.semester || "ZIMSKI"}`}>
-                          {labelForProgram(sp.programId)} — {sp.yearNumber}. g. — {semLabel(sp.semester || "ZIMSKI")}
-                        </div>
-                      ))
-                    }
-                  </td>
-                  <td style={{whiteSpace:"nowrap"}}>
-                    <button className="btn" onClick={()=>startEdit(s)}>Edit</button>{" "}
-                    <button className="btn" onClick={()=>onDelete(s.id)}>Delete</button>
-                  </td>
-                </>
-              )}
-            </tr>
-          ))}
+                      {ePrograms.length > 0 && (
+                        <ul
+                          style={{
+                            marginTop: 6,
+                            display: "flex",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {ePrograms.map((p) => (
+                            <li
+                              key={`${p.programId}:${p.yearNumber}:${p.semester}`}
+                              style={{
+                                padding: "2px 8px",
+                                border: "1px solid #444",
+                                borderRadius: 999,
+                              }}
+                            >
+                              {labelForProgram(p.programId)} —{" "}
+                              {p.yearNumber}. g. —{" "}
+                              {semLabel(p.semester)}
+                              {" "}
+                              <button
+                                type="button"
+                                className="btn"
+                                onClick={() =>
+                                  eRemoveProgram(
+                                    p.programId,
+                                    p.yearNumber,
+                                    p.semester
+                                  )
+                                }
+                              >
+                                ×
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn"
+                        onClick={() => saveEdit(s.id)}
+                      >
+                        Save
+                      </button>{" "}
+                      <button
+                        className="btn"
+                        onClick={cancelEdit}
+                      >
+                        Cancel
+                      </button>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td>{s.code ?? "-"}</td>
+                    <td>{s.name}</td>
+                    <td>{s.isElective ? "Izborni" : "Obavezni"}</td>
+                    <td>{s.ects ?? "-"}</td>
+                    <td>
+                      {(s.subjectPrograms || []).length === 0
+                        ? "-"
+                        : (s.subjectPrograms || []).map((sp) => (
+                            <div
+                              key={`${sp.programId}:${sp.yearNumber}:${sp.semester || "ZIMSKI"}`}
+                            >
+                              {labelForProgram(sp.programId)} —{" "}
+                              {sp.yearNumber}. g. —{" "}
+                              {semLabel(sp.semester || "ZIMSKI")}
+                            </div>
+                          ))}
+                    </td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn"
+                        onClick={() => startEdit(s)}
+                      >
+                        Edit
+                      </button>{" "}
+                      <button
+                        className="btn"
+                        onClick={() => onDelete(s.id)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
 
-      <div style={{display:"flex", gap:8, alignItems:"center", marginTop:8}}>
-        <button className="btn" disabled={safePage<=1} onClick={()=>setPage(p=>Math.max(1,p-1))}>Prev</button>
-        <span>Page {safePage} / {totalPages}</span>
-        <button className="btn" disabled={safePage>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))}>Next</button>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          marginTop: 8,
+        }}
+      >
+        <button
+          className="btn"
+          disabled={safePage <= 1}
+          onClick={() =>
+            setPage((p) => Math.max(1, p - 1))
+          }
+        >
+          Prev
+        </button>
+        <span>
+          Page {safePage} / {totalPages}
+        </span>
+        <button
+          className="btn"
+          disabled={safePage >= totalPages}
+          onClick={() =>
+            setPage((p) => Math.min(totalPages, p + 1))
+          }
+        >
+          Next
+        </button>
       </div>
     </div>
   );

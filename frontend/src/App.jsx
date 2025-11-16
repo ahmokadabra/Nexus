@@ -135,7 +135,7 @@ export default function App() {
             }}
           >
             <div style={{ textAlign: "center" }}>
-              <Logo size={800} />
+              <Logo size={400} />
               <div
                 style={{
                   marginTop: 8,

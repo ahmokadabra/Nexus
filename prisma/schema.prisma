@@ -58,12 +58,13 @@ model Professor {
 }
 
 model Subject {
-  id        String   @id @default(cuid())
-  code      String?  @unique // code je opcionalan
-  name      String
-  ects      Int?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  code       String?  @unique // code je opcionalan
+  name       String
+  ects       Int?
+  isElective Boolean  @default(false) // false = obavezni, true = izborni
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   courses         Course[]
   subjectPrograms SubjectOnProgramYear[] // join sa programima (po godini + semestru)
