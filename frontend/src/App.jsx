@@ -5,10 +5,10 @@ import PlanRealizacije from "./components/PlanRealizacije.jsx";
 import DatabasePage from "./pages/DatabasePage";
 import TeacherLoad from "./components/TeacherLoad.jsx"; // ⬅️ DODANO
 
-// Logo se čita iz /public/logo.svg
+// Logo se čita iz /public/logo.png
 const Logo = ({ size = 120 }) => (
   <img
-    src="/logo.svg"
+    src="/logo.png"
     alt="Nexus"
     style={{ width: size, height: "auto" }}
     onError={(e) => {
