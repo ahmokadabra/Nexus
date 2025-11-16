@@ -49,27 +49,53 @@ export default function LoginPage({ onLogin }) {
         color: "var(--text)",
       }}
     >
-      <div className="card" style={{ minWidth: 320, padding: 24 }}>
-        <h2 style={{ marginTop: 0, marginBottom: 16, textAlign: "center" }}>
-          Prijava u Nexus
-        </h2>
+      <div
+        className="card"
+        style={{
+          minWidth: 320,
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 16,
+        }}
+      >
+        {/* Logo + naslov */}
+        <div style={{ textAlign: "center" }}>
+          <img
+            src="/logo.png"
+            alt="Nexus logo"
+            style={{ width: 120, height: "auto", marginBottom: 8 }}
+          />
+          <h2 style={{ margin: 0 }}>Prijava</h2>
+        </div>
 
         <form
           onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 12,
+            width: "100%",
+          }}
         >
-          <label>
-            <div style={{ marginBottom: 4 }}>Korisničko ime</div>
+          <div style={{ width: "100%", maxWidth: 320 }}>
+            <label style={{ display: "block", textAlign: "left", marginBottom: 4 }}>
+              Korisničko ime
+            </label>
             <input
               className="input"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
             />
-          </label>
+          </div>
 
-          <label>
-            <div style={{ marginBottom: 4 }}>Lozinka</div>
+          <div style={{ width: "100%", maxWidth: 320 }}>
+            <label style={{ display: "block", textAlign: "left", marginBottom: 4 }}>
+              Lozinka
+            </label>
             <input
               className="input"
               type="password"
@@ -77,31 +103,23 @@ export default function LoginPage({ onLogin }) {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
             />
-          </label>
+          </div>
 
           {error && (
-            <div className="error" style={{ marginTop: 4 }}>
+            <div className="error" style={{ marginTop: 4, width: "100%", maxWidth: 320 }}>
               {error}
             </div>
           )}
 
-          <button className="btn" type="submit" disabled={loading}>
+          <button
+            className="btn"
+            type="submit"
+            disabled={loading}
+            style={{ marginTop: 4, width: "100%", maxWidth: 320 }}
+          >
             {loading ? "Prijava..." : "Prijavi se"}
           </button>
         </form>
-
-        <div
-          style={{
-            marginTop: 12,
-            fontSize: 12,
-            color: "var(--muted)",
-            textAlign: "center",
-          }}
-        >
-          Ako nemaš admin korisnika, otvori backend URL{" "}
-          <code>/api/auth/seed-admin</code> da kreiraš inicijalnog admina
-          (username: <b>admin</b>, lozinka: <b>admin123</b>).
-        </div>
       </div>
     </div>
   );

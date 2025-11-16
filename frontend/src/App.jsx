@@ -128,14 +128,14 @@ export default function App() {
         {!active && (
           <div
             style={{
-              paddingTop: 16,
-              paddingBottom: 16,
+              paddingTop: 10,
+              paddingBottom: 10,
               display: "flex",
               justifyContent: "center",
             }}
           >
             <div style={{ textAlign: "center" }}>
-              <Logo size={960} />
+              <Logo size={800} />
               <div
                 style={{
                   marginTop: 8,

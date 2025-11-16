@@ -156,3 +156,30 @@ router.put("/:id", async (req, res) => {
     });
   }
 });
+
+// DELETE /api/users/:id – obriši korisnika (samo admin)
+// (ne dozvoljavamo da admin sam sebe obriše)
+router.delete("/:id", async (req, res) => {
+  const admin = requireAdmin(req, res);
+  if (!admin) return;
+
+  const id = req.params.id;
+  if (admin.userId === id) {
+    return res
+      .status(400)
+      .json({ message: "Ne možete obrisati vlastiti korisnički račun." });
+  }
+
+  try {
+    await prisma.user.delete({
+      where: { id },
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({
+      message: "Cannot delete user",
+      detail: String(e?.message || e),
+    });
+  }
+});

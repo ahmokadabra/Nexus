@@ -106,6 +106,29 @@ export default function AdminPage() {
     }
   }
 
+  // ⬇️ NOVO: brisanje korisnika
+  async function deleteUser(id) {
+    if (!window.confirm("Da li ste sigurni da želite obrisati ovog korisnika?")) {
+      return;
+    }
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/users/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Greška pri brisanju korisnika");
+      }
+      setUsers((prev) => prev.filter((u) => u.id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="card">
       <h2>Administracija korisnika</h2>
@@ -253,7 +276,12 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {users.map((u) => (
-                <UserRow key={u.id} user={u} onUpdate={updateUser} />
+                <UserRow
+                  key={u.id}
+                  user={u}
+                  onUpdate={updateUser}
+                  onDelete={deleteUser}   // ⬅️ NOVO
+                />
               ))}
             </tbody>
           </table>
@@ -263,7 +291,7 @@ export default function AdminPage() {
   );
 }
 
-function UserRow({ user, onUpdate }) {
+function UserRow({ user, onUpdate, onDelete }) {  // ⬅️ NOVO: onDelete
   const [password, setPassword] = useState("");
 
   function toggle(field) {
@@ -339,6 +367,15 @@ function UserRow({ user, onUpdate }) {
           />
           <button className="btn" type="submit" disabled={!password}>
             Spasi
+          </button>
+          {/* ⬇️ NOVO dugme za brisanje */}
+          <button
+            type="button"
+            className="btn"
+            style={{ backgroundColor: "#7f1d1d" }}
+            onClick={() => onDelete(user.id)}
+          >
+            Obriši
           </button>
         </form>
       </td>
