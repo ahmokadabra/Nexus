@@ -55,7 +55,7 @@ export default function App() {
           </header>
         )}
 
-        {/* Početni ekran = samo logo, centriran */}
+        {/* Početni ekran = logo + tekst, centrirano */}
         {!active && (
           <div
             style={{
@@ -65,7 +65,8 @@ export default function App() {
             }}
           >
             <div style={{ textAlign: "center" }}>
-              <Logo size={160} />
+              {/* ⬇️ OVDJE JE PROMJENA – 6x veći nego prije (960 umjesto 160) */}
+              <Logo size={960} />
               <div style={{ marginTop: 12, fontSize: 18, color: "var(--muted)" }}>
                 Dobrodošli u Nexus
               </div>
