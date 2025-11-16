@@ -9,11 +9,8 @@ import TeacherLoad from "./components/TeacherLoad.jsx"; // ⬅️ DODANO
 const Logo = ({ size = 120 }) => (
   <img
     src="/logo.png"
-    alt="Nexus"
+    alt="Nexus logo"
     style={{ width: size, height: "auto" }}
-    onError={(e) => {
-      e.currentTarget.style.display = "none";
-    }}
   />
 );
 
