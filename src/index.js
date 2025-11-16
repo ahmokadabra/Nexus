@@ -3,6 +3,8 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { prisma } from "./prisma.js";
+import { router as authRouter } from "./routes/auth.js";
+import { router as usersRouter } from "./routes/users.js";
 
 // API routeri
 import { router as professorsRouter } from "./routes/professors.js";
@@ -68,6 +70,8 @@ app.use("/api/professors", professorsRouter);
 app.use("/api/subjects", subjectsRouter);
 app.use("/api/rooms", roomsRouter);
 app.use("/api/planrealizacije", planRealizacijeRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/users", usersRouter);
 
 // Studijski programi – obje putanje rade
 app.use("/api/programs", studyProgramsRouter);
