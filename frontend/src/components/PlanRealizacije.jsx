@@ -1,6 +1,6 @@
 // frontend/src/components/PlanRealizacije.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPut } from "../lib/api";
+import { apiGet, apiPut, apiPost } from "../lib/api";
 import * as XLSX from "xlsx-js-style";
 
 const TITLE_MAP = {
@@ -130,6 +130,44 @@ export default function PlanRealizacije() {
     } catch (e) {
       setMsg({ type: "err", text: e.message });
       changeRow(r.id, { saving: false });
+    }
+  }
+
+  // ⬇️ NOVO: dodaj novog nastavnika (novi PRNRow za isti plan + predmet)
+  async function addTeacherRow(r) {
+    try {
+      if (!r?.planId || !r?.subjectId) {
+        setMsg({
+          type: "err",
+          text: "Nedostaje planId ili subjectId za dodavanje nastavnika.",
+        });
+        return;
+      }
+
+      const created = await apiPost("/api/planrealizacije/rows/add-teacher", {
+        planId: r.planId,
+        subjectId: r.subjectId,
+      });
+
+      const newRow = {
+        ...created,
+        _edit: {
+          professorId: created.professorId || "",
+          lectureTotal: created.lectureTotal ?? 0,
+          exerciseTotal: created.exerciseTotal ?? 0,
+          mode: inferMode(created),
+          saving: false,
+        },
+      };
+
+      // novi nastavnik ide u isti predmet (grouping po subject.id već radi)
+      setRows((arr) => [...arr, newRow]);
+      setMsg({ type: "ok", text: "Dodat novi nastavnik za predmet." });
+    } catch (e) {
+      setMsg({
+        type: "err",
+        text: e.message || "Greška pri dodavanju nastavnika.",
+      });
     }
   }
 
@@ -628,9 +666,21 @@ export default function PlanRealizacije() {
                         <td>{Ew.toFixed(2)}</td>
                         <td>{Uw.toFixed(2)}</td>
 
-                        <td style={{whiteSpace:"nowrap"}}>
-                          <button className="btn" disabled={r._edit?.saving} onClick={()=>saveRow(r)}>
+                        <td style={{whiteSpace:"nowrap", display:"flex", gap:4}}>
+                          <button
+                            className="btn"
+                            disabled={r._edit?.saving}
+                            onClick={()=>saveRow(r)}
+                          >
                             {r._edit?.saving ? "..." : "Save"}
+                          </button>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() => addTeacherRow(r)}
+                            title="Dodaj nastavnika za ovaj predmet"
+                          >
+                            +
                           </button>
                         </td>
                       </tr>

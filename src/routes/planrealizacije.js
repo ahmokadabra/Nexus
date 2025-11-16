@@ -1,3 +1,4 @@
+// src/routes/planrealizacije.js
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
@@ -289,7 +290,8 @@ const addRowSchema = z.object({
   subjectId: z.string().min(1),
 });
 
-router.post("/rows", async (req, res) => {
+// ⬇️ OVDJE JE BITNA IZMJENA: putanja je /rows/add-teacher umjesto /rows
+router.post("/rows/add-teacher", async (req, res) => {
   const parsed = addRowSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
 
