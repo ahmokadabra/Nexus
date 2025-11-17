@@ -93,15 +93,35 @@ async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) 
   const existingIds = new Set(existing.map(r => r.subjectId));
 
   const toCreate = [...linkIds].filter(id => !existingIds.has(id));
+
   if (toCreate.length) {
-    await prisma.pRNRow.createMany({
-      data: toCreate.map(sid => ({
+    // ⬇️ NOVO: pokušaj naći "šablon" za svaki subjectId iz nekog drugog plana
+    const templates = await prisma.pRNRow.findMany({
+      where: { subjectId: { in: toCreate } },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const templateBySubject = new Map();
+    for (const t of templates) {
+      // uzmi prvi pronađeni za svaki predmet
+      if (!templateBySubject.has(t.subjectId)) {
+        templateBySubject.set(t.subjectId, t);
+      }
+    }
+
+    const data = toCreate.map((sid) => {
+      const t = templateBySubject.get(sid);
+      return {
         planId,
         subjectId: sid,
-        // polja iz tvoje sheme:
-        lectureHours: 0,
-        exerciseHours: 0,
-      })),
+        lectureHours: t?.lectureHours ?? 0,
+        exerciseHours: t?.exerciseHours ?? 0,
+        professorId: t?.professorId ?? null,
+      };
+    });
+
+    await prisma.pRNRow.createMany({
+      data,
       skipDuplicates: true, // koristi ako imaš @@unique([planId, subjectId])
     });
   }
@@ -238,6 +258,37 @@ router.put("/rows/:id", async (req, res) => {
       data,
       include: { subject: true, professor: true },
     });
+
+    // ⬇️ NOVO: propagiraj na ostale planove isti predmet,
+    // ali SAMO na "prazne" redove (professorId null, 0 sati)
+    try {
+      if (updated.subjectId) {
+        const propagateData = {};
+        const hasProf = parsed.data.professorId !== undefined;
+        const hasL = parsed.data.lectureTotal !== undefined;
+        const hasE = parsed.data.exerciseTotal !== undefined;
+
+        if (hasProf) propagateData.professorId = updated.professorId || null;
+        if (hasL) propagateData.lectureHours = updated.lectureHours ?? 0;
+        if (hasE) propagateData.exerciseHours = updated.exerciseHours ?? 0;
+
+        if (Object.keys(propagateData).length > 0) {
+          await prisma.pRNRow.updateMany({
+            where: {
+              subjectId: updated.subjectId,
+              id: { not: updated.id },
+              professorId: null,
+              lectureHours: 0,
+              exerciseHours: 0,
+            },
+            data: propagateData,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("PRN propagate error:", e);
+      // ne rušimo glavni update ako propagacija pukne
+    }
 
     res.json({
       ...updated,
