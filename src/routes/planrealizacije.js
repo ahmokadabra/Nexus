@@ -78,38 +78,48 @@ router.get("/programs", async (_req, res) => {
   res.json(programs);
 });
 
-/** Osiguraj redove u planu prema SubjectOnProgramYear (dodaj nedostajuće; opciono počisti višak). */
+/** Osiguraj redove u planu prema SubjectOnProgramYear (dodaj nedostajuće; opciono počisti višak)
+ *  i uskladi SVE redove za te predmete u ovom planu sa globalnim "kanonskim" redom.
+ */
 async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) {
   const links = await prisma.subjectOnProgramYear.findMany({
     where: { programId, yearNumber },
     select: { subjectId: true },
   });
-  const linkIds = new Set(links.map(l => l.subjectId));
+  const linkIds = new Set(links.map((l) => l.subjectId));
+  const linkIdsArr = [...linkIds];
+
+  if (linkIdsArr.length === 0) {
+    if (prune) {
+      await prisma.pRNRow.deleteMany({ where: { planId } });
+    }
+    return;
+  }
 
   const existing = await prisma.pRNRow.findMany({
     where: { planId },
     select: { subjectId: true },
   });
-  const existingIds = new Set(existing.map(r => r.subjectId));
+  const existingIds = new Set(existing.map((r) => r.subjectId));
 
-  const toCreate = [...linkIds].filter(id => !existingIds.has(id));
+  const toCreate = linkIdsArr.filter((id) => !existingIds.has(id));
 
-  if (toCreate.length) {
-    // ⬇️ NOVO: pokušaj naći "šablon" za svaki subjectId iz nekog drugog plana
-    const templates = await prisma.pRNRow.findMany({
-      where: { subjectId: { in: toCreate } },
-      orderBy: { createdAt: "asc" },
-    });
+  // ⬇️ kanonski red za svaki subjectId: najnoviji updatedAt u CIJELOJ bazi
+  const templates = await prisma.pRNRow.findMany({
+    where: { subjectId: { in: linkIdsArr } },
+    orderBy: { updatedAt: "desc" },
+  });
 
-    const templateBySubject = new Map();
-    for (const t of templates) {
-      // uzmi prvi pronađeni za svaki predmet
-      if (!templateBySubject.has(t.subjectId)) {
-        templateBySubject.set(t.subjectId, t);
-      }
+  const templateBySubject = new Map();
+  for (const t of templates) {
+    if (!templateBySubject.has(t.subjectId)) {
+      templateBySubject.set(t.subjectId, t);
     }
+  }
 
-    const data = toCreate.map((sid) => {
+  // 1) Kreiraj nedostajuće redove prema kanonskom šablonu
+  if (toCreate.length) {
+    const dataToCreate = toCreate.map((sid) => {
       const t = templateBySubject.get(sid);
       return {
         planId,
@@ -121,16 +131,49 @@ async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) 
     });
 
     await prisma.pRNRow.createMany({
-      data,
-      skipDuplicates: true, // koristi ako imaš @@unique([planId, subjectId])
+      data: dataToCreate,
+      skipDuplicates: true, // ako postoji unique constraint
     });
+  }
+
+  // 2) Uskladi SVE postojeće redove u ovom planu sa kanonskim vrijednostima
+  const existingRows = await prisma.pRNRow.findMany({
+    where: { planId, subjectId: { in: linkIdsArr } },
+  });
+
+  const updates = [];
+  for (const row of existingRows) {
+    const t = templateBySubject.get(row.subjectId);
+    if (!t) continue;
+
+    const needsUpdate =
+      row.professorId !== t.professorId ||
+      (row.lectureHours ?? 0) !== (t.lectureHours ?? 0) ||
+      (row.exerciseHours ?? 0) !== (t.exerciseHours ?? 0);
+
+    if (needsUpdate) {
+      updates.push(
+        prisma.pRNRow.update({
+          where: { id: row.id },
+          data: {
+            professorId: t.professorId ?? null,
+            lectureHours: t.lectureHours ?? 0,
+            exerciseHours: t.exerciseHours ?? 0,
+          },
+        })
+      );
+    }
+  }
+
+  if (updates.length) {
+    await prisma.$transaction(updates);
   }
 
   if (prune) {
     await prisma.pRNRow.deleteMany({
       where: {
         planId,
-        NOT: { subjectId: { in: [...linkIds] } },
+        NOT: { subjectId: { in: linkIdsArr } },
       },
     });
   }
@@ -173,7 +216,7 @@ router.get("/plan", async (req, res) => {
     const facultyName = FACULTY_BY_CODE[full?.program?.code || ""] || "";
 
     // mapiraj na nazive koje UI očekuje
-    const mappedRows = (full.rows || []).map(r => ({
+    const mappedRows = (full.rows || []).map((r) => ({
       ...r,
       lectureTotal: r.lectureHours ?? 0,
       exerciseTotal: r.exerciseHours ?? 0,
@@ -219,7 +262,7 @@ router.post("/plan/seed-rows", async (req, res) => {
       },
     });
 
-    const mappedRows = (full.rows || []).map(r => ({
+    const mappedRows = (full.rows || []).map((r) => ({
       ...r,
       lectureTotal: r.lectureHours ?? 0,
       exerciseTotal: r.exerciseHours ?? 0,
@@ -238,8 +281,8 @@ router.post("/plan/seed-rows", async (req, res) => {
 
 // UPDATE jednog reda (profesor/sati)
 const rowUpdateSchema = z.object({
-  professorId:  z.string().min(1).nullable().optional(),
-  lectureTotal:  z.coerce.number().int().min(0).optional(),
+  professorId: z.string().min(1).nullable().optional(),
+  lectureTotal: z.coerce.number().int().min(0).optional(),
   exerciseTotal: z.coerce.number().int().min(0).optional(),
 });
 
@@ -259,8 +302,7 @@ router.put("/rows/:id", async (req, res) => {
       include: { subject: true, professor: true },
     });
 
-    // ⬇️ NOVO: propagiraj na ostale planove isti predmet,
-    // ali SAMO na "prazne" redove (professorId null, 0 sati)
+    // ⬇️ NOVO: propagiraj izmjene na SVE redove za isti predmet u svim planovima
     try {
       if (updated.subjectId) {
         const propagateData = {};
@@ -277,9 +319,6 @@ router.put("/rows/:id", async (req, res) => {
             where: {
               subjectId: updated.subjectId,
               id: { not: updated.id },
-              professorId: null,
-              lectureHours: 0,
-              exerciseHours: 0,
             },
             data: propagateData,
           });
@@ -334,7 +373,6 @@ router.post("/rows", async (req, res) => {
   }
 });
 
-
 // DODAJ NASTAVNIKA (novi red za isti predmet u istom planu)
 const addRowSchema = z.object({
   planId: z.string().min(1),
@@ -378,7 +416,6 @@ router.post("/rows/add-teacher", async (req, res) => {
     res.status(400).json({ message: "Cannot add teacher row", detail: String(e?.message || e) });
   }
 });
-
 
 // (opcionalno) lista planova
 router.get("/", async (req, res) => {
