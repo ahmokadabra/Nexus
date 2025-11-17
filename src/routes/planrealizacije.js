@@ -277,7 +277,11 @@ router.get("/plan", async (req, res) => {
             subject: { include: { subjectPrograms: { include: { program: true } } } },
             professor: true,
           },
-          orderBy: [{ subject: { code: "asc" } }, { subject: { name: "asc" } }],
+          orderBy: [
+            { subject: { code: "asc" } },
+            { subject: { name: "asc" } },
+            { createdAt: "asc" },           // ⬅️ stabilan redoslijed slotova po predmetu
+          ],
         },
       },
     });
@@ -326,7 +330,11 @@ router.post("/plan/seed-rows", async (req, res) => {
             subject: { include: { subjectPrograms: { include: { program: true } } } },
             professor: true,
           },
-          orderBy: [{ subject: { code: "asc" } }, { subject: { name: "asc" } }],
+          orderBy: [
+            { subject: { code: "asc" } },
+            { subject: { name: "asc" } },
+            { createdAt: "asc" },         // ⬅️ isto i ovdje
+          ],
         },
       },
     });
@@ -371,7 +379,7 @@ router.put("/rows/:id", async (req, res) => {
       include: { subject: true, professor: true },
     });
 
-    // ⬇️ NOVO: propagiraj izmjene na ISTI "slot" (index reda) za taj predmet u svim planovima
+    // ⬇️ propagiraj izmjene na ISTI "slot" (index reda) za taj predmet u svim planovima
     try {
       if (updated.subjectId && updated.planId) {
         // svi redovi za ovaj predmet
@@ -537,7 +545,17 @@ router.get("/", async (req, res) => {
 
   const plans = await prisma.pRNPlan.findMany({
     where,
-    include: { program: true, rows: { include: { subject: true, professor: true } } },
+    include: {
+      program: true,
+      rows: {
+        include: { subject: true, professor: true },
+        orderBy: [
+          { subject: { code: "asc" } },
+          { subject: { name: "asc" } },
+          { createdAt: "asc" },       // ⬅️ i ovdje, radi konzistentnosti
+        ],
+      },
+    },
     orderBy: [{ yearNumber: "asc" }],
   });
 
@@ -593,7 +611,7 @@ router.get("/teacher-load", async (_req, res) => {
         professorTitle: prof?.title || null,
         professorTitleLabel: prof?.title ? (TITLE_MAP[prof.title] || prof.title) : "",
         engagement: prof?.engagement || null,
-        engagementLabel: prof?.engagement ? (ENG_MAP[prof.engagement] || prof.engagement) : "",
+        engagementLabel: prof?.engagement ? (ENG_MAP[prof.engagement] || ENG_MAP[prof.engagement]) : "",
         subjectName: r.subject.name,
         subjectCode: r.subject.code || null,
 
