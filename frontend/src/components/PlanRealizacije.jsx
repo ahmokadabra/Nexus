@@ -13,6 +13,11 @@ const TITLE_MAP = {
 };
 const ENG_MAP = { EMPLOYED: "RO", EXTERNAL: "VS" }; // Radni odnos / Vanjski saradnik
 
+function formatProfessor(p) {
+  if (!p) return "";
+  return p.title ? `${p.name} — ${TITLE_MAP[p.title] || p.title}` : p.name;
+}
+
 export default function PlanRealizacije() {
   const [programs, setPrograms] = useState([]);
   const [selectedProgramId, setSelectedProgramId] = useState("");
@@ -22,6 +27,7 @@ export default function PlanRealizacije() {
   const [profs, setProfs] = useState([]);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [activeProfInput, setActiveProfInput] = useState(null); // koji red je fokusiran za typeahead
 
   // učitaj programe + profesore
   useEffect(() => {
@@ -69,6 +75,7 @@ export default function PlanRealizacije() {
             exerciseTotal: r.exerciseTotal ?? 0,
             mode: inferMode(r), // "P" | "V" | "PV"
             saving: false,
+            profSearch: "", // za typeahead input
           },
         }))
       );
@@ -137,6 +144,54 @@ export default function PlanRealizacije() {
     }
   }
 
+  // "brisanje" reda = čišćenje (profesor null, sati 0) — koristi postojeći PUT endpoint
+  async function clearRow(r) {
+    if (!r) return;
+    const ok = window.confirm("Da li sigurno želiš očistiti ovaj red?");
+    if (!ok) return;
+
+    const body = {
+      professorId: null,
+      lectureTotal: 0,
+      exerciseTotal: 0,
+    };
+
+    changeRow(r.id, { saving: true });
+    try {
+      const saved = await apiPut(`/api/planrealizacije/rows/${r.id}`, body);
+      setMsg({ type: "ok", text: "Red je očišćen." });
+
+      setRows((arr) =>
+        arr.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                professorId: saved.professorId,
+                lectureTotal: saved.lectureTotal,
+                exerciseTotal: saved.exerciseTotal,
+                professor: null,
+                _edit: {
+                  ...x._edit,
+                  professorId: "",
+                  profSearch: "",
+                  lectureTotal: saved.lectureTotal,
+                  exerciseTotal: saved.exerciseTotal,
+                  mode: inferMode(saved),
+                  saving: false,
+                },
+              }
+            : x
+        )
+      );
+    } catch (e) {
+      setMsg({
+        type: "err",
+        text: e.message || "Greška pri čišćenju reda.",
+      });
+      changeRow(r.id, { saving: false });
+    }
+  }
+
   // ⬇️ dodaj novog nastavnika (novi PRNRow za isti plan + predmet)
   async function addTeacherRow(r) {
     try {
@@ -161,6 +216,7 @@ export default function PlanRealizacije() {
           exerciseTotal: created.exerciseTotal ?? 0,
           mode: inferMode(created),
           saving: false,
+          profSearch: "",
         },
       };
 
@@ -365,9 +421,7 @@ export default function PlanRealizacije() {
           const prof =
             r.professor ||
             profs.find((p) => p.id === (r.professorId || r._edit?.professorId));
-          const bucket = prof?.engagement
-            ? ENG_MAP[prof.engagement]
-            : null;
+          const bucket = prof?.engagement ? ENG_MAP[prof.engagement] : null;
           totals.ALL.L += L;
           totals.ALL.E += E;
           if (bucket === "RO") {
@@ -504,13 +558,7 @@ export default function PlanRealizacije() {
               toCell(idx === 0 ? subjectCellValue : "", sTDLeft),
               toCell(mode, sTDCenter),
               toCell(
-                prof
-                  ? `${prof.name}${
-                      prof.title
-                        ? ` — ${TITLE_MAP[prof.title] || prof.title}`
-                        : ""
-                    }`
-                  : "—",
+                prof ? formatProfessor(prof) : "—",
                 sTDLeft
               ),
               toCell(anga, sTDCenter),
@@ -773,6 +821,25 @@ export default function PlanRealizacije() {
                       : "-";
                     const mode = r._edit?.mode || "PV";
 
+                    const searchValue =
+                      r._edit?.profSearch !== undefined &&
+                      r._edit?.profSearch !== null &&
+                      r._edit.profSearch !== ""
+                        ? r._edit.profSearch
+                        : formatProfessor(prof);
+
+                    const query = (r._edit?.profSearch || "").toLowerCase();
+                    const suggestions =
+                      query.length === 0
+                        ? []
+                        : profs
+                            .filter((p) =>
+                              formatProfessor(p)
+                                .toLowerCase()
+                                .includes(query)
+                            )
+                            .slice(0, 20);
+
                     return (
                       <tr key={`${r.id}-${idx}`}>
                         {/* subject cell merged vizuelno: prvi red prikazuje, ostali prazni */}
@@ -838,25 +905,84 @@ export default function PlanRealizacije() {
                           </select>
                         </td>
 
-                        {/* profesor */}
-                        <td style={{ minWidth: 220 }}>
-                          <select
+                        {/* profesor – typeahead input */}
+                        <td
+                          style={{
+                            minWidth: 220,
+                            position: "relative",
+                          }}
+                        >
+                          <input
                             className="input"
-                            value={String(profId)}
+                            value={searchValue}
+                            placeholder="Kreni kucati ime nastavnika..."
                             onChange={(e) =>
-                              changeRow(r.id, { professorId: e.target.value })
+                              changeRow(r.id, {
+                                profSearch: e.target.value,
+                                professorId: "",
+                              })
                             }
-                          >
-                            <option value="">— odaberi —</option>
-                            {profs.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}
-                                {p.title
-                                  ? ` — ${TITLE_MAP[p.title] || p.title}`
-                                  : ""}
-                              </option>
-                            ))}
-                          </select>
+                            onFocus={() => setActiveProfInput(r.id)}
+                            onBlur={() =>
+                              setTimeout(
+                                () => setActiveProfInput((prev) =>
+                                  prev === r.id ? null : prev
+                                ),
+                                150
+                              )
+                            }
+                          />
+                          {activeProfInput === r.id &&
+                            suggestions.length > 0 && (
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  top: "100%",
+                                  left: 0,
+                                  right: 0,
+                                  zIndex: 10,
+                                  background: "#111827",
+                                  border: "1px solid #374151",
+                                  maxHeight: 220,
+                                  overflowY: "auto",
+                                  marginTop: 2,
+                                }}
+                              >
+                                {suggestions.map((p) => {
+                                  const label = formatProfessor(p);
+                                  return (
+                                    <div
+                                      key={p.id}
+                                      onMouseDown={() => {
+                                        changeRow(r.id, {
+                                          professorId: p.id,
+                                          profSearch: label,
+                                        });
+                                        setActiveProfInput(null);
+                                      }}
+                                      style={{
+                                        padding: "4px 8px",
+                                        cursor: "pointer",
+                                        fontSize: 14,
+                                      }}
+                                    >
+                                      {label}
+                                    </div>
+                                  );
+                                })}
+                                {suggestions.length === 0 && (
+                                  <div
+                                    style={{
+                                      padding: "4px 8px",
+                                      fontSize: 12,
+                                      opacity: 0.7,
+                                    }}
+                                  >
+                                    Nema rezultata
+                                  </div>
+                                )}
+                              </div>
+                            )}
                         </td>
 
                         <td>{anga}</td>
@@ -937,6 +1063,14 @@ export default function PlanRealizacije() {
                             title="Dodaj nastavnika za ovaj predmet"
                           >
                             +
+                          </button>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={() => clearRow(r)}
+                            title="Očisti ovaj red (bez profesora i sati)"
+                          >
+                            -
                           </button>
                         </td>
                       </tr>
