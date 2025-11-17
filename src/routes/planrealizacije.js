@@ -78,102 +78,171 @@ router.get("/programs", async (_req, res) => {
   res.json(programs);
 });
 
-/** Osiguraj redove u planu prema SubjectOnProgramYear (dodaj nedostajuće; opciono počisti višak)
- *  i uskladi SVE redove za te predmete u ovom planu sa globalnim "kanonskim" redom.
+/**
+ * Osiguraj redove u planu prema SubjectOnProgramYear (dodaj nedostajuće; opciono počisti višak)
+ * i uskladi SVE redove za te predmete u ovom planu sa globalnim "kanonskim" setom redova.
+ *
+ * Kanonski set redova za predmet = redovi iz onog plana koji ima NAJVIŠE redova za taj predmet
+ * (ako je više planova sa istim brojem, uzima se onaj sa najmanjim planId).
  */
 async function ensurePlanRows({ programId, yearNumber, planId, prune = false }) {
+  // koji predmeti trebaju biti u ovom planu
   const links = await prisma.subjectOnProgramYear.findMany({
     where: { programId, yearNumber },
     select: { subjectId: true },
   });
-  const linkIds = new Set(links.map((l) => l.subjectId));
-  const linkIdsArr = [...linkIds];
+  const subjectIdSet = new Set(links.map((l) => l.subjectId));
+  const subjectIds = [...subjectIdSet];
 
-  if (linkIdsArr.length === 0) {
+  if (subjectIds.length === 0) {
     if (prune) {
       await prisma.pRNRow.deleteMany({ where: { planId } });
     }
     return;
   }
 
-  const existing = await prisma.pRNRow.findMany({
-    where: { planId },
-    select: { subjectId: true },
+  // redovi u ovom planu
+  const currentRows = await prisma.pRNRow.findMany({
+    where: { planId, subjectId: { in: subjectIds } },
+    orderBy: { createdAt: "asc" },
   });
-  const existingIds = new Set(existing.map((r) => r.subjectId));
+  const currentBySubject = new Map();
+  for (const r of currentRows) {
+    if (!currentBySubject.has(r.subjectId)) currentBySubject.set(r.subjectId, []);
+    currentBySubject.get(r.subjectId).push(r);
+  }
 
-  const toCreate = linkIdsArr.filter((id) => !existingIds.has(id));
-
-  // ⬇️ kanonski red za svaki subjectId: najnoviji updatedAt u CIJELOJ bazi
-  const templates = await prisma.pRNRow.findMany({
-    where: { subjectId: { in: linkIdsArr } },
-    orderBy: { updatedAt: "desc" },
+  // svi redovi za ove predmete u svim planovima
+  const allRows = await prisma.pRNRow.findMany({
+    where: { subjectId: { in: subjectIds } },
+    orderBy: { createdAt: "asc" },
   });
 
-  const templateBySubject = new Map();
-  for (const t of templates) {
-    if (!templateBySubject.has(t.subjectId)) {
-      templateBySubject.set(t.subjectId, t);
+  // subjectId -> Map<planId, PRNRow[]>
+  const bySubjectByPlan = new Map();
+  for (const r of allRows) {
+    let planMap = bySubjectByPlan.get(r.subjectId);
+    if (!planMap) {
+      planMap = new Map();
+      bySubjectByPlan.set(r.subjectId, planMap);
+    }
+    let arr = planMap.get(r.planId);
+    if (!arr) {
+      arr = [];
+      planMap.set(r.planId, arr);
+    }
+    arr.push(r);
+  }
+
+  const ops = [];
+
+  for (const subjectId of subjectIds) {
+    const planMap = bySubjectByPlan.get(subjectId) || new Map();
+
+    // pronađi kanonski set redova za ovaj predmet
+    let canonicalRows = null;
+
+    if (planMap.size > 0) {
+      let bestPlanId = null;
+      let bestRows = [];
+
+      for (const [pid, rows] of planMap.entries()) {
+        // sortiraj unutar plana po createdAt
+        rows.sort((a, b) => a.createdAt - b.createdAt);
+        if (
+          !bestPlanId ||
+          rows.length > bestRows.length ||
+          (rows.length === bestRows.length && pid < bestPlanId)
+        ) {
+          bestPlanId = pid;
+          bestRows = rows;
+        }
+      }
+
+      canonicalRows = bestRows;
+    }
+
+    const current = (currentBySubject.get(subjectId) || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+
+    // ako nigdje nema šablona za ovaj predmet
+    if (!canonicalRows || canonicalRows.length === 0) {
+      // ako ovaj plan već ima bar jedan red, ostavi tako
+      if (current.length === 0) {
+        // kreiraj jedan prazan red
+        ops.push(
+          prisma.pRNRow.create({
+            data: {
+              planId,
+              subjectId,
+              professorId: null,
+              lectureHours: 0,
+              exerciseHours: 0,
+            },
+          })
+        );
+      }
+      continue;
+    }
+
+    // postoji kanonski set redova
+    const maxLen = Math.max(canonicalRows.length, current.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      const c = canonicalRows[i];
+      const cur = current[i];
+
+      if (c && !cur) {
+        // nedostaje red u ovom planu -> kreiraj prema kanonskom
+        ops.push(
+          prisma.pRNRow.create({
+            data: {
+              planId,
+              subjectId,
+              professorId: c.professorId ?? null,
+              lectureHours: c.lectureHours ?? 0,
+              exerciseHours: c.exerciseHours ?? 0,
+            },
+          })
+        );
+      } else if (!c && cur) {
+        // višak u odnosu na kanonski set
+        if (prune) {
+          ops.push(prisma.pRNRow.delete({ where: { id: cur.id } }));
+        }
+        // ako ne prune, ostavi višak
+      } else if (c && cur) {
+        // postoje oba -> uskladi vrijednosti ako se razlikuju
+        const needUpdate =
+          cur.professorId !== c.professorId ||
+          (cur.lectureHours ?? 0) !== (c.lectureHours ?? 0) ||
+          (cur.exerciseHours ?? 0) !== (c.exerciseHours ?? 0);
+
+        if (needUpdate) {
+          ops.push(
+            prisma.pRNRow.update({
+              where: { id: cur.id },
+              data: {
+                professorId: c.professorId ?? null,
+                lectureHours: c.lectureHours ?? 0,
+                exerciseHours: c.exerciseHours ?? 0,
+              },
+            })
+          );
+        }
+      }
     }
   }
 
-  // 1) Kreiraj nedostajuće redove prema kanonskom šablonu
-  if (toCreate.length) {
-    const dataToCreate = toCreate.map((sid) => {
-      const t = templateBySubject.get(sid);
-      return {
-        planId,
-        subjectId: sid,
-        lectureHours: t?.lectureHours ?? 0,
-        exerciseHours: t?.exerciseHours ?? 0,
-        professorId: t?.professorId ?? null,
-      };
-    });
-
-    await prisma.pRNRow.createMany({
-      data: dataToCreate,
-      skipDuplicates: true, // ako postoji unique constraint
-    });
-  }
-
-  // 2) Uskladi SVE postojeće redove u ovom planu sa kanonskim vrijednostima
-  const existingRows = await prisma.pRNRow.findMany({
-    where: { planId, subjectId: { in: linkIdsArr } },
-  });
-
-  const updates = [];
-  for (const row of existingRows) {
-    const t = templateBySubject.get(row.subjectId);
-    if (!t) continue;
-
-    const needsUpdate =
-      row.professorId !== t.professorId ||
-      (row.lectureHours ?? 0) !== (t.lectureHours ?? 0) ||
-      (row.exerciseHours ?? 0) !== (t.exerciseHours ?? 0);
-
-    if (needsUpdate) {
-      updates.push(
-        prisma.pRNRow.update({
-          where: { id: row.id },
-          data: {
-            professorId: t.professorId ?? null,
-            lectureHours: t.lectureHours ?? 0,
-            exerciseHours: t.exerciseHours ?? 0,
-          },
-        })
-      );
-    }
-  }
-
-  if (updates.length) {
-    await prisma.$transaction(updates);
+  if (ops.length) {
+    await prisma.$transaction(ops);
   }
 
   if (prune) {
+    // pobriši redove za predmete koji više nisu u SubjectOnProgramYear
     await prisma.pRNRow.deleteMany({
       where: {
         planId,
-        NOT: { subjectId: { in: linkIdsArr } },
+        subjectId: { notIn: subjectIds },
       },
     });
   }
@@ -302,26 +371,68 @@ router.put("/rows/:id", async (req, res) => {
       include: { subject: true, professor: true },
     });
 
-    // ⬇️ NOVO: propagiraj izmjene na SVE redove za isti predmet u svim planovima
+    // ⬇️ NOVO: propagiraj izmjene na ISTI "slot" (index reda) za taj predmet u svim planovima
     try {
-      if (updated.subjectId) {
-        const propagateData = {};
-        const hasProf = parsed.data.professorId !== undefined;
-        const hasL = parsed.data.lectureTotal !== undefined;
-        const hasE = parsed.data.exerciseTotal !== undefined;
+      if (updated.subjectId && updated.planId) {
+        // svi redovi za ovaj predmet
+        const allRows = await prisma.pRNRow.findMany({
+          where: { subjectId: updated.subjectId },
+          orderBy: { createdAt: "asc" },
+        });
 
-        if (hasProf) propagateData.professorId = updated.professorId || null;
-        if (hasL) propagateData.lectureHours = updated.lectureHours ?? 0;
-        if (hasE) propagateData.exerciseHours = updated.exerciseHours ?? 0;
+        // subjectId već filtriran, grupiši po planId
+        const byPlan = new Map();
+        for (const r of allRows) {
+          let arr = byPlan.get(r.planId);
+          if (!arr) {
+            arr = [];
+            byPlan.set(r.planId, arr);
+          }
+          arr.push(r);
+        }
 
-        if (Object.keys(propagateData).length > 0) {
-          await prisma.pRNRow.updateMany({
-            where: {
-              subjectId: updated.subjectId,
-              id: { not: updated.id },
-            },
-            data: propagateData,
-          });
+        const currentList = (byPlan.get(updated.planId) || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+        const slotIndex = currentList.findIndex((r) => r.id === updated.id);
+
+        if (slotIndex >= 0) {
+          const targetData = {
+            professorId: updated.professorId ?? null,
+            lectureHours: updated.lectureHours ?? 0,
+            exerciseHours: updated.exerciseHours ?? 0,
+          };
+
+          const txOps = [];
+
+          for (const [planId, rows] of byPlan.entries()) {
+            const sorted = rows.slice().sort((a, b) => a.createdAt - b.createdAt);
+            if (planId === updated.planId) continue;
+
+            if (slotIndex < sorted.length) {
+              // postoji red na istom indexu -> update
+              const row = sorted[slotIndex];
+              txOps.push(
+                prisma.pRNRow.update({
+                  where: { id: row.id },
+                  data: targetData,
+                })
+              );
+            } else {
+              // ovaj plan ima manje redova -> dodaj novi red za taj slot
+              txOps.push(
+                prisma.pRNRow.create({
+                  data: {
+                    planId,
+                    subjectId: updated.subjectId,
+                    ...targetData,
+                  },
+                })
+              );
+            }
+          }
+
+          if (txOps.length) {
+            await prisma.$transaction(txOps);
+          }
         }
       }
     } catch (e) {
@@ -379,7 +490,7 @@ const addRowSchema = z.object({
   subjectId: z.string().min(1),
 });
 
-// ⬇️ OVDJE JE BITNA IZMJENA: putanja je /rows/add-teacher umjesto /rows
+// ⬇️ putanja je /rows/add-teacher
 router.post("/rows/add-teacher", async (req, res) => {
   const parsed = addRowSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten() });
