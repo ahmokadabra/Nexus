@@ -1069,13 +1069,16 @@ export default function PlanRealizacije() {
                 <td>{computed.total.RO.L}</td>
                 <td>{computed.total.RO.E}</td>
                 <td>{computed.sumRO}</td>
-                <td>{(computed.total.RO.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.RO.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumRO / 15).toFixed(2)}</td>
 
-                {/* Udio RO desno, u istom redu */}
-                <td>
-                  <div style={{ display: "flex", gap: 8 }}>
+                {/* Udio RO pomjeren ulijevo, preko sedmičnih kolona + akcijske */}
+                <td colSpan={4}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                    }}
+                  >
                     <span style={{ opacity: 0.8 }}>Udio RO:</span>
                     <strong>{computed.pctRO.toFixed(2)}%</strong>
                   </div>
@@ -1092,13 +1095,16 @@ export default function PlanRealizacije() {
                 <td>{computed.total.VS.L}</td>
                 <td>{computed.total.VS.E}</td>
                 <td>{computed.sumVS}</td>
-                <td>{(computed.total.VS.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.VS.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumVS / 15).toFixed(2)}</td>
 
-                {/* Udio VS desno */}
-                <td>
-                  <div style={{ display: "flex", gap: 8 }}>
+                {/* Udio VS pomjeren ulijevo, preko sedmičnih kolona + akcijske */}
+                <td colSpan={4}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                    }}
+                  >
                     <span style={{ opacity: 0.8 }}>Udio VS:</span>
                     <strong>{computed.pctVS.toFixed(2)}%</strong>
                   </div>
@@ -1115,13 +1121,16 @@ export default function PlanRealizacije() {
                 <td>{computed.total.ALL.L}</td>
                 <td>{computed.total.ALL.E}</td>
                 <td>{computed.sumALL}</td>
-                <td>{(computed.total.ALL.L / 15).toFixed(2)}</td>
-                <td>{(computed.total.ALL.E / 15).toFixed(2)}</td>
-                <td>{(computed.sumALL / 15).toFixed(2)}</td>
 
-                {/* Ukupno 100% desno */}
-                <td>
-                  <div style={{ display: "flex", gap: 8 }}>
+                {/* Ukupno 100% pomjereno ulijevo, preko sedmičnih kolona + akcijske */}
+                <td colSpan={4}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                    }}
+                  >
                     <span style={{ opacity: 0.8 }}>Ukupno:</span>
                     <strong>100%</strong>
                   </div>
