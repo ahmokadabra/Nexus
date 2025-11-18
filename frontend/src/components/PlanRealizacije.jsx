@@ -355,13 +355,13 @@ export default function PlanRealizacije() {
         numFmt: "0.00\\%",
       };
 
-      // Kolone (10 kolona bez "Save" dugmeta)
+      // Kolone (10 kolona bez "Udio" extra)
       // A: Predmet, B: P/V, C: Nastavnici, D: Angažman,
       // E: L (uk), F: V (uk), G: Ukupno,
       // H: L/15, I: V/15, J: Uk/15
       const cols = [
         { wch: 40 }, // Predmet
-        { wch: 6 }, // P/V
+        { wch: 6 },  // P/V
         { wch: 28 }, // Nastavnici
         { wch: 10 }, // Angažman
         { wch: 12 }, // L total
@@ -558,7 +558,9 @@ export default function PlanRealizacije() {
           }
         });
 
-        // Totali (tri reda, svaki sa brojevima i desno udjelima)
+        // Totali (tri reda) – bez zbrajanja sedmičnih koeficijenata u dnu
+        // RO
+        const roRowIndex = data.length;
         data.push([
           toCell("Ukupno iz radnog odnosa (RO):", sTotalLabel),
           toCell("", sTotal),
@@ -567,19 +569,26 @@ export default function PlanRealizacije() {
           toCell(totals.RO.L, sTotal, "n"),
           toCell(totals.RO.E, sTotal, "n"),
           toCell(sumRO, sTotal, "n"),
-          toCell(totals.RO.L / 15, sTotal, "n"),
-          toCell(totals.RO.E / 15, sTotal, "n"),
-          toCell(sumRO / 15, sTotal, "n"),
+          toCell(`Udio RO: ${pctRO.toFixed(2)}%`, {
+            font: { bold: true },
+            alignment: { horizontal: "left", vertical: "center" },
+            fill: { fgColor: { rgb: "FFE5E7EB" } },
+            border: BORDERS,
+          }),
+          toCell("", sTotal),
+          toCell("", sTotal),
         ]);
-        data[data.length - 1].push(
-          toCell("Udio RO:", sTotalPctLabel),
-          toCell(pctRO / 100, sTotalPctVal, "n")
-        );
         merges.push({
-          s: { r: data.length - 1, c: 0 },
-          e: { r: data.length - 1, c: 3 },
+          s: { r: roRowIndex, c: 0 },
+          e: { r: roRowIndex, c: 3 },
+        });
+        merges.push({
+          s: { r: roRowIndex, c: 7 },
+          e: { r: roRowIndex, c: 9 },
         });
 
+        // VS
+        const vsRowIndex = data.length;
         data.push([
           toCell("Ukupno iz honorarnog angažmana (VS):", sTotalLabel),
           toCell("", sTotal),
@@ -588,19 +597,26 @@ export default function PlanRealizacije() {
           toCell(totals.VS.L, sTotal, "n"),
           toCell(totals.VS.E, sTotal, "n"),
           toCell(sumVS, sTotal, "n"),
-          toCell(totals.VS.L / 15, sTotal, "n"),
-          toCell(totals.VS.E / 15, sTotal, "n"),
-          toCell(sumVS / 15, sTotal, "n"),
+          toCell(`Udio VS: ${pctVS.toFixed(2)}%`, {
+            font: { bold: true },
+            alignment: { horizontal: "left", vertical: "center" },
+            fill: { fgColor: { rgb: "FFE5E7EB" } },
+            border: BORDERS,
+          }),
+          toCell("", sTotal),
+          toCell("", sTotal),
         ]);
-        data[data.length - 1].push(
-          toCell("Udio VS:", sTotalPctLabel),
-          toCell(pctVS / 100, sTotalPctVal, "n")
-        );
         merges.push({
-          s: { r: data.length - 1, c: 0 },
-          e: { r: data.length - 1, c: 3 },
+          s: { r: vsRowIndex, c: 0 },
+          e: { r: vsRowIndex, c: 3 },
+        });
+        merges.push({
+          s: { r: vsRowIndex, c: 7 },
+          e: { r: vsRowIndex, c: 9 },
         });
 
+        // ALL
+        const allRowIndex = data.length;
         data.push([
           toCell("Ukupno:", sTotalLabel),
           toCell("", sTotal),
@@ -609,23 +625,34 @@ export default function PlanRealizacije() {
           toCell(totals.ALL.L, sTotal, "n"),
           toCell(totals.ALL.E, sTotal, "n"),
           toCell(sumALL, sTotal, "n"),
-          toCell(totals.ALL.L / 15, sTotal, "n"),
-          toCell(totals.ALL.E / 15, sTotal, "n"),
-          toCell(sumALL / 15, sTotal, "n"),
+          toCell("Ukupno: 100.00%", {
+            font: { bold: true },
+            alignment: { horizontal: "left", vertical: "center" },
+            fill: { fgColor: { rgb: "FFE5E7EB" } },
+            border: BORDERS,
+          }),
+          toCell("", sTotal),
+          toCell("", sTotal),
         ]);
-        data[data.length - 1].push(
-          toCell("Ukupno:", sTotalPctLabel),
-          toCell(1, sTotalPctVal, "n")
-        ); // 100%
         merges.push({
-          s: { r: data.length - 1, c: 0 },
-          e: { r: data.length - 1, c: 3 },
+          s: { r: allRowIndex, c: 0 },
+          e: { r: allRowIndex, c: 3 },
+        });
+        merges.push({
+          s: { r: allRowIndex, c: 7 },
+          e: { r: allRowIndex, c: 9 },
         });
 
         // Pretvori u sheet
         const ws = XLSX.utils.aoa_to_sheet(data);
-        ws["!cols"] = [...cols, { wch: 12 }, { wch: 10 }]; // dvije dodatne za "Udio"
-        ws["!merges"] = merges;
+        ws["!cols"] = cols;
+
+        // "Auto-fit" visine redova – veće visine da višelinijski tekst stane
+        ws["!rows"] = Array.from({ length: data.length }, (_, idx) => {
+          if (idx <= 3) return { hpt: 18 }; // naslovni dio
+          if (idx === headerStart || idx === headerStart + 1) return { hpt: 24 }; // header
+          return { hpt: 30 }; // tijelo tabele + totali
+        });
 
         const sheetName = `G${planY?.yearNumber || yr}`;
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -717,7 +744,7 @@ export default function PlanRealizacije() {
         <div>Nema podataka za prikaz.</div>
       ) : (
         <>
-          {/* ovaj dodatni header (naziv faksa + program + godina) ostavljen je kako jeste */}
+          {/* ovaj dodatni header (naziv faksa + program + godina) */}
           <div style={{ margin: "12px 0" }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>
               Plan realizacije nastave
@@ -761,7 +788,7 @@ export default function PlanRealizacije() {
                   <td colSpan={11}>Nema redova</td>
                 </tr>
               ) : (
-                grouped.map((group, gi) => {
+                grouped.map((group) => {
                   const subj = group[0]?.subject || {};
                   const subjectName = subj.name || "";
                   const subjectCode = subj.code ? ` (${subj.code})` : "";
@@ -1075,7 +1102,7 @@ export default function PlanRealizacije() {
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "flex-end",
+                      justifyContent: "flex-start",
                       gap: 8,
                     }}
                   >
@@ -1101,7 +1128,7 @@ export default function PlanRealizacije() {
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "flex-end",
+                      justifyContent: "flex-start",
                       gap: 8,
                     }}
                   >
@@ -1127,7 +1154,7 @@ export default function PlanRealizacije() {
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "flex-end",
+                      justifyContent: "flex-start",
                       gap: 8,
                     }}
                   >
