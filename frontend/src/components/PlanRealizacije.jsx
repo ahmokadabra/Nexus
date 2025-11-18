@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet, apiPut, apiPost } from "../lib/api";
+import { apiGet, apiPut, apiPost, apiDelete } from "../lib/api";
 import * as XLSX from "xlsx-js-style";
 
 const TITLE_MAP = {
@@ -144,51 +144,29 @@ export default function PlanRealizacije() {
     }
   }
 
-  // "brisanje" reda = čišćenje (profesor null, sati 0) — koristi postojeći PUT endpoint
-  async function clearRow(r) {
+  // PRAVO brisanje reda – DELETE endpoint
+  async function deleteRow(r) {
     if (!r) return;
-    const ok = window.confirm("Da li sigurno želiš očistiti ovaj red?");
+    const ok = window.confirm(
+      "Da li sigurno želiš OBRISATI ovaj red? (isti slot će biti obrisan za ovaj predmet i u drugim planovima)"
+    );
     if (!ok) return;
 
-    const body = {
-      professorId: null,
-      lectureTotal: 0,
-      exerciseTotal: 0,
-    };
-
-    changeRow(r.id, { saving: true });
     try {
-      const saved = await apiPut(`/api/planrealizacije/rows/${r.id}`, body);
-      setMsg({ type: "ok", text: "Red je očišćen." });
+      const resp = await apiDelete(`/api/planrealizacije/rows/${r.id}`);
+      const deletedIds =
+        resp && Array.isArray(resp.deletedIds) && resp.deletedIds.length
+          ? resp.deletedIds
+          : [r.id];
 
-      setRows((arr) =>
-        arr.map((x) =>
-          x.id === r.id
-            ? {
-                ...x,
-                professorId: saved.professorId,
-                lectureTotal: saved.lectureTotal,
-                exerciseTotal: saved.exerciseTotal,
-                professor: null,
-                _edit: {
-                  ...x._edit,
-                  professorId: "",
-                  profSearch: "",
-                  lectureTotal: saved.lectureTotal,
-                  exerciseTotal: saved.exerciseTotal,
-                  mode: inferMode(saved),
-                  saving: false,
-                },
-              }
-            : x
-        )
-      );
+      setRows((arr) => arr.filter((row) => !deletedIds.includes(row.id)));
+
+      setMsg({ type: "ok", text: "Red obrisan." });
     } catch (e) {
       setMsg({
         type: "err",
-        text: e.message || "Greška pri čišćenju reda.",
+        text: e.message || "Greška pri brisanju reda.",
       });
-      changeRow(r.id, { saving: false });
     }
   }
 
@@ -925,9 +903,10 @@ export default function PlanRealizacije() {
                             onFocus={() => setActiveProfInput(r.id)}
                             onBlur={() =>
                               setTimeout(
-                                () => setActiveProfInput((prev) =>
-                                  prev === r.id ? null : prev
-                                ),
+                                () =>
+                                  setActiveProfInput((prev) =>
+                                    prev === r.id ? null : prev
+                                  ),
                                 150
                               )
                             }
@@ -1067,8 +1046,8 @@ export default function PlanRealizacije() {
                           <button
                             className="btn"
                             type="button"
-                            onClick={() => clearRow(r)}
-                            title="Očisti ovaj red (bez profesora i sati)"
+                            onClick={() => deleteRow(r)}
+                            title="Obriši ovaj red"
                           >
                             -
                           </button>

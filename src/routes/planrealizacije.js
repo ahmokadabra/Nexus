@@ -458,6 +458,80 @@ router.put("/rows/:id", async (req, res) => {
   }
 });
 
+/**
+ * DELETE jednog reda:
+ *  - nađe red
+ *  - izračuna njegov index (slot) u tom planu za taj predmet
+ *  - obriše isti slot u SVIM planovima za taj predmet
+ */
+router.delete("/rows/:id", async (req, res) => {
+  try {
+    const row = await prisma.pRNRow.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!row) {
+      return res.status(404).json({ message: "Row not found" });
+    }
+
+    if (!row.subjectId || !row.planId) {
+      // fallback: ako iz nekog razloga nema subjectId/planId, obriši samo taj red
+      await prisma.pRNRow.delete({ where: { id: row.id } });
+      return res.json({ ok: true, deletedIds: [row.id] });
+    }
+
+    // svi redovi za taj predmet, svi planovi
+    const allRows = await prisma.pRNRow.findMany({
+      where: { subjectId: row.subjectId },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const byPlan = new Map();
+    for (const r of allRows) {
+      let arr = byPlan.get(r.planId);
+      if (!arr) {
+        arr = [];
+        byPlan.set(r.planId, arr);
+      }
+      arr.push(r);
+    }
+
+    const currentList = (byPlan.get(row.planId) || []).slice().sort((a, b) => a.createdAt - b.createdAt);
+    const slotIndex = currentList.findIndex((r) => r.id === row.id);
+
+    if (slotIndex < 0) {
+      // ne bi se trebalo desiti, ali za svaki slučaj:
+      await prisma.pRNRow.delete({ where: { id: row.id } });
+      return res.json({ ok: true, deletedIds: [row.id] });
+    }
+
+    const ops = [];
+    const deletedIds = [];
+
+    for (const [, rows] of byPlan.entries()) {
+      const sorted = rows.slice().sort((a, b) => a.createdAt - b.createdAt);
+      if (slotIndex < sorted.length) {
+        const toDelete = sorted[slotIndex];
+        ops.push(
+          prisma.pRNRow.delete({
+            where: { id: toDelete.id },
+          })
+        );
+        deletedIds.push(toDelete.id);
+      }
+    }
+
+    if (ops.length) {
+      await prisma.$transaction(ops);
+    }
+
+    res.json({ ok: true, deletedIds });
+  } catch (e) {
+    console.error("PRN delete row error:", e);
+    res.status(400).json({ message: "Cannot delete row", detail: String(e?.message || e) });
+  }
+});
+
 // POST /api/planrealizacije/rows  -> kreira novi red za postojeći plan + subject
 router.post("/rows", async (req, res) => {
   const schema = z.object({
