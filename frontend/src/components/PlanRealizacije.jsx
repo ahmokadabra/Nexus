@@ -337,7 +337,8 @@ export default function PlanRealizacije() {
       };
       const sTotalLabel = {
         font: { bold: true },
-        alignment: { horizontal: "right", vertical: "center" },
+        // ⬅︎ lijevo poravnanje u spojenim A–D ćelijama
+        alignment: { horizontal: "left", vertical: "center" },
         fill: { fgColor: { rgb: "FFF3F4F6" } },
         border: BORDERS,
       };
@@ -361,7 +362,7 @@ export default function PlanRealizacije() {
       // H: L/15, I: V/15, J: Uk/15
       const cols = [
         { wch: 40 }, // Predmet
-        { wch: 6 },  // P/V
+        { wch: 6 }, // P/V
         { wch: 28 }, // Nastavnici
         { wch: 10 }, // Angažman
         { wch: 12 }, // L total
@@ -392,7 +393,11 @@ export default function PlanRealizacije() {
         const rowsY = Array.isArray(dataYear.rows) ? dataYear.rows : [];
 
         // proračuni za ovu godinu
-        const totals = { RO: { L: 0, E: 0 }, VS: { L: 0, E: 0 }, ALL: { L: 0, E: 0 } };
+        const totals = {
+          RO: { L: 0, E: 0 },
+          VS: { L: 0, E: 0 },
+          ALL: { L: 0, E: 0 },
+        };
         rowsY.forEach((r) => {
           const L = Number(r.lectureTotal ?? 0);
           const E = Number(r.exerciseTotal ?? 0);
@@ -483,10 +488,22 @@ export default function PlanRealizacije() {
         ];
         data.push(h2);
         // Merge za prva 4 header polja (da izgledaju kao jedna visina)
-        merges.push({ s: { r: headerStart, c: 0 }, e: { r: headerStart + 1, c: 0 } });
-        merges.push({ s: { r: headerStart, c: 1 }, e: { r: headerStart + 1, c: 1 } });
-        merges.push({ s: { r: headerStart, c: 2 }, e: { r: headerStart + 1, c: 2 } });
-        merges.push({ s: { r: headerStart, c: 3 }, e: { r: headerStart + 1, c: 3 } });
+        merges.push({
+          s: { r: headerStart, c: 0 },
+          e: { r: headerStart + 1, c: 0 },
+        });
+        merges.push({
+          s: { r: headerStart, c: 1 },
+          e: { r: headerStart + 1, c: 1 },
+        });
+        merges.push({
+          s: { r: headerStart, c: 2 },
+          e: { r: headerStart + 1, c: 2 },
+        });
+        merges.push({
+          s: { r: headerStart, c: 3 },
+          e: { r: headerStart + 1, c: 3 },
+        });
 
         // Tabela redovi
         groupedYear.forEach((group) => {
@@ -535,10 +552,7 @@ export default function PlanRealizacije() {
             data.push([
               toCell(idx === 0 ? subjectCellValue : "", sTDLeft),
               toCell(mode, sTDCenter),
-              toCell(
-                prof ? formatProfessor(prof) : "—",
-                sTDLeft
-              ),
+              toCell(prof ? formatProfessor(prof) : "—", sTDLeft),
               toCell(anga, sTDCenter),
               toCell(L, sTDInt, "n"),
               toCell(E, sTDInt, "n"),
@@ -551,6 +565,7 @@ export default function PlanRealizacije() {
 
           if (group.length > 1) {
             const lastRowIndex = data.length - 1;
+            // merge naziva predmeta u koloni A (1) preko svih nastavnika
             merges.push({
               s: { r: firstRowIndex, c: 0 },
               e: { r: lastRowIndex, c: 0 },
@@ -578,10 +593,12 @@ export default function PlanRealizacije() {
           toCell("", sTotal),
           toCell("", sTotal),
         ]);
+        // merge kolona 1–4 (A–D)
         merges.push({
           s: { r: roRowIndex, c: 0 },
           e: { r: roRowIndex, c: 3 },
         });
+        // merge kolona 8–10 (H–J)
         merges.push({
           s: { r: roRowIndex, c: 7 },
           e: { r: roRowIndex, c: 9 },
@@ -653,6 +670,9 @@ export default function PlanRealizacije() {
           if (idx === headerStart || idx === headerStart + 1) return { hpt: 24 }; // header
           return { hpt: 30 }; // tijelo tabele + totali
         });
+
+        // ⬅︎ ovdje aktiviramo sve merge-ove
+        ws["!merges"] = merges;
 
         const sheetName = `G${planY?.yearNumber || yr}`;
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
