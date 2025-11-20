@@ -20,6 +20,14 @@ const FACULTY_PROGRAMS = {
 // Godine i studijski programi za matricu broja studenata
 const YEARS = [1, 2, 3, 4];
 const PROGRAM_KEYS = ["FIR", "RI", "SMDP", "TUG", "EP"];
+const WEEKS_PER_SEMESTER = 15;
+
+// asistent / viši asistent -> V se računa 1:1, ostali -> 0.5
+function isAssistantTitle(titleLabel) {
+  if (!titleLabel) return false;
+  const t = String(titleLabel).toLowerCase();
+  return t.includes("asistent"); // pokriva "asistent" i "viši asistent"
+}
 
 function belongsToFaculty(row, facultyId) {
   const keys = FACULTY_PROGRAMS[facultyId] || [];
@@ -47,7 +55,8 @@ function createEmptyYearProgStudents() {
 }
 
 // grupisanje za UKUPAN pregled – deduplikacija predmeta po profesoru
-//  + grupirana logika: broj studenata po godini/SP iz matrice + max u grupi po predmetu
+//  + logika grupa (yearProgStudents + subjectGroupConfig)
+//  + nova logika za P + 0.5V / P + 1V za asistente
 function buildSummaryGroups(
   allRows,
   subjectGroupConfig = {},
@@ -86,9 +95,6 @@ function buildSummaryGroups(
         yearProgramPairs: new Set(), // kombinacije godina+SP (npr. "1|FIR")
         lectureHours: 0,
         exerciseHours: 0,
-        totalPV: 0,
-        totalWeighted: 0,
-        weekly: 0,
         opterecenjePremaNormama: null,
       };
       g.subjectsMap.set(subjKey, subj);
@@ -132,25 +138,19 @@ function buildSummaryGroups(
     // Sati – NE sabiramo po SP, već uzimamo maksimum (isti predmet na više SP)
     const L = Number(r.lectureHours || 0);
     const E = Number(r.exerciseHours || 0);
-    const TPV = Number(r.totalPV || 0);
-    const TW = Number(r.totalWeighted || 0);
-    const W = Number(r.weekly || 0);
-
     subj.lectureHours = Math.max(subj.lectureHours, L);
     subj.exerciseHours = Math.max(subj.exerciseHours, E);
-    subj.totalPV = Math.max(subj.totalPV, TPV);
-    subj.totalWeighted = Math.max(subj.totalWeighted, TW);
-    subj.weekly = Math.max(subj.weekly, W);
 
     if (r.opterecenjePremaNormama != null) {
       subj.opterecenjePremaNormama = r.opterecenjePremaNormama;
     }
   });
 
-  // pretvaranje u listu sa primjenjenim brojem grupa
-  return Array.from(map.values()).map((g) => ({
-    professor: g.professor,
-    subjects: Array.from(g.subjectsMap.values()).map((s) => {
+  // pretvaranje u listu sa primjenjenim brojem grupa i novom P+0.5V logikom
+  return Array.from(map.values()).map((g) => {
+    const isAssistant = isAssistantTitle(g.professor.titleLabel);
+
+    const subjects = Array.from(g.subjectsMap.values()).map((s) => {
       // broj studenata za ovaj predmet – sumira sve (godina,SP) iz matrice
       let studentsTotal = 0;
       if (
@@ -177,6 +177,18 @@ function buildSummaryGroups(
         groupsCount = Math.ceil(studentsTotal / maxPerGroup);
       }
 
+      const baseLecture = s.lectureHours;
+      const baseExercise = s.exerciseHours;
+      const basePV = baseLecture + baseExercise;
+      const baseWeighted =
+        baseLecture + (isAssistant ? 1 : 0.5) * baseExercise;
+
+      const lectureHours = baseLecture * groupsCount;
+      const exerciseHours = baseExercise * groupsCount;
+      const totalPV = basePV * groupsCount;
+      const totalWeighted = baseWeighted * groupsCount;
+      const weekly = totalWeighted / WEEKS_PER_SEMESTER;
+
       return {
         subjectName: s.subjectName,
         subjectCode: s.subjectCode,
@@ -187,15 +199,20 @@ function buildSummaryGroups(
         spEP: s.spEP,
         yearNumber: Array.from(s.yearSet).join(", "),
         semester: Array.from(s.semesterSet).join(", "),
-        lectureHours: s.lectureHours * groupsCount,
-        exerciseHours: s.exerciseHours * groupsCount,
-        totalPV: s.totalPV * groupsCount,
-        totalWeighted: s.totalWeighted * groupsCount,
-        weekly: s.weekly * groupsCount,
+        lectureHours,
+        exerciseHours,
+        totalPV,
+        totalWeighted,
+        weekly,
         opterecenjePremaNormama: s.opterecenjePremaNormama,
       };
-    }),
-  }));
+    });
+
+    return {
+      professor: g.professor,
+      subjects,
+    };
+  });
 }
 
 // helper: kreiranje jednog sheet-a iz grupisanih podataka (već agregirani podaci)
@@ -337,6 +354,7 @@ export default function TeacherLoad() {
 
   // UKUPAN PREGLED – grupisano po profesoru + predmetu, bez dupliranja po SP,
   // i sa primjenjenim brojem grupa (iz yearProgStudents + subjectGroupConfig)
+  // i novom P+0.5V / P+1V logikom
   const summaryGroups = useMemo(() => {
     if (!rows.length) return [];
     return buildSummaryGroups(rows, subjectGroupConfig, yearProgStudents);
@@ -435,7 +453,7 @@ export default function TeacherLoad() {
   const activeLabel =
     VIEW_TABS.find((t) => t.id === activeView)?.label || "";
 
-  // Download Excel – sheet "Ukupno" + EF/FTN/BF/FTUG, sve sa istom logikom
+  // Download Excel – sheet "Ukupno" + EF/FTN/BF/FTUG, sve sa istom logikom (grupe + P+0.5V/1V)
   async function downloadExcel() {
     if (!rows.length) {
       setMsg({
@@ -729,94 +747,203 @@ export default function TeacherLoad() {
                 <td colSpan={17}>Nema podataka za prikaz.</td>
               </tr>
             ) : (
-              summaryGroups.map((g, gi) =>
-                g.subjects.map((r, idx) => (
-                  <tr
-                    key={`${gi}-${idx}-${
-                      r.subjectCode || r.subjectName || "row"
-                    }`}
-                  >
-                    {/* Ime i prezime (spojena ćelija po profesoru) */}
-                    <td
-                      rowSpan={idx === 0 ? g.subjects.length : 1}
-                      style={idx === 0 ? {} : { display: "none" }}
-                    >
-                      {g.professor.name || "—"}
-                    </td>
+              summaryGroups.map((g, gi) => {
+                // Totali po profesoru
+                const totals = g.subjects.reduce(
+                  (acc, r) => {
+                    acc.lecture += Number(r.lectureHours || 0);
+                    acc.exercise += Number(r.exerciseHours || 0);
+                    acc.pv += Number(r.totalPV || 0);
+                    acc.weighted += Number(r.totalWeighted || 0);
+                    acc.weekly += Number(r.weekly || 0);
 
-                    {/* Naučno zvanje */}
-                    <td
-                      rowSpan={idx === 0 ? g.subjects.length : 1}
-                      style={idx === 0 ? {} : { display: "none" }}
-                    >
-                      {g.professor.titleLabel || ""}
-                    </td>
+                    const normeVal = r.opterecenjePremaNormama;
+                    const normeNum = Number(normeVal);
+                    if (
+                      normeVal != null &&
+                      normeVal !== "" &&
+                      !Number.isNaN(normeNum)
+                    ) {
+                      acc.norme += normeNum;
+                      acc.hasNorme = true;
+                    }
+                    return acc;
+                  },
+                  {
+                    lecture: 0,
+                    exercise: 0,
+                    pv: 0,
+                    weighted: 0,
+                    weekly: 0,
+                    norme: 0,
+                    hasNorme: false,
+                  }
+                );
 
-                    {/* Radni status (RO / VS) */}
-                    <td
-                      rowSpan={idx === 0 ? g.subjects.length : 1}
-                      style={idx === 0 ? {} : { display: "none" }}
-                    >
-                      {g.professor.engagementLabel || ""}
-                    </td>
+                return (
+                  <React.Fragment key={gi}>
+                    {g.subjects.map((r, idx) => (
+                      <tr
+                        key={`${gi}-${idx}-${
+                          r.subjectCode || r.subjectName || "row"
+                        }`}
+                      >
+                        {/* Ime i prezime (spojena ćelija po profesoru) */}
+                        <td
+                          rowSpan={
+                            idx === 0 ? g.subjects.length : 1
+                          }
+                          style={
+                            idx === 0 ? {} : { display: "none" }
+                          }
+                        >
+                          {g.professor.name || "—"}
+                        </td>
 
-                    {/* Predmet */}
-                    <td>
-                      {r.subjectName}
-                      {r.subjectCode ? ` (${r.subjectCode})` : ""}
-                    </td>
+                        {/* Naučno zvanje */}
+                        <td
+                          rowSpan={
+                            idx === 0 ? g.subjects.length : 1
+                          }
+                          style={
+                            idx === 0 ? {} : { display: "none" }
+                          }
+                        >
+                          {g.professor.titleLabel || ""}
+                        </td>
 
-                    {/* Studijski programi – X gdje pripada */}
-                    <td style={{ textAlign: "center" }}>
-                      {r.spFIR || ""}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {r.spRI || ""}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {r.spTUG || ""}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {r.spSMDP || ""}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {r.spEP || ""}
-                    </td>
+                        {/* Radni status (RO / VS) */}
+                        <td
+                          rowSpan={
+                            idx === 0 ? g.subjects.length : 1
+                          }
+                          style={
+                            idx === 0 ? {} : { display: "none" }
+                          }
+                        >
+                          {g.professor.engagementLabel || ""}
+                        </td>
 
-                    {/* Godina i semestar */}
-                    <td style={{ textAlign: "center" }}>
-                      {r.yearNumber}
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {r.semester}
-                    </td>
+                        {/* Predmet */}
+                        <td>
+                          {r.subjectName}
+                          {r.subjectCode ? ` (${r.subjectCode})` : ""}
+                        </td>
 
-                    {/* Sati – već skalirani prema broju grupa */}
-                    <td style={{ textAlign: "right" }}>
-                      {r.lectureHours}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {r.exerciseHours}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {r.totalPV}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {Number(r.totalWeighted || 0).toFixed(2)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {Number(r.weekly || 0).toFixed(2)}
-                    </td>
+                        {/* Studijski programi – X gdje pripada */}
+                        <td style={{ textAlign: "center" }}>
+                          {r.spFIR || ""}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {r.spRI || ""}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {r.spTUG || ""}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {r.spSMDP || ""}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {r.spEP || ""}
+                        </td>
 
-                    {/* Opterećenje prema normama */}
-                    <td style={{ textAlign: "center" }}>
-                      {r.opterecenjePremaNormama == null
-                        ? ""
-                        : r.opterecenjePremaNormama}
-                    </td>
-                  </tr>
-                ))
-              )
+                        {/* Godina i semestar */}
+                        <td style={{ textAlign: "center" }}>
+                          {r.yearNumber}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {r.semester}
+                        </td>
+
+                        {/* Sati – već skalirani prema broju grupa i novoj P+0.5V/1V logici */}
+                        <td style={{ textAlign: "right" }}>
+                          {r.lectureHours}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {r.exerciseHours}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {r.totalPV}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {Number(r.totalWeighted || 0).toFixed(2)}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {Number(r.weekly || 0).toFixed(2)}
+                        </td>
+
+                        {/* Opterećenje prema normama */}
+                        <td style={{ textAlign: "center" }}>
+                          {r.opterecenjePremaNormama == null
+                            ? ""
+                            : r.opterecenjePremaNormama}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* RED "UKUPNO" ZA PROFESORA */}
+                    <tr>
+                      <td
+                        colSpan={11}
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Ukupno:
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.lecture}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.exercise}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.pv}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.weighted.toFixed(2)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.weekly.toFixed(2)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: "center",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {totals.hasNorme ? totals.norme : ""}
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
