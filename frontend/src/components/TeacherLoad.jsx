@@ -1,4 +1,4 @@
-// frontend/src/components/TeacherLoad.jsx 
+// frontend/src/components/TeacherLoad.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../lib/api";
 import * as XLSX from "xlsx-js-style";
@@ -9,13 +9,17 @@ const VIEW_TABS = [
   { id: "GROUPS", label: "Grupe" },
 ];
 
-// Ovo zadržavamo samo za Excel (sheet-ove po fakultetima)
+// Za Excel sheetove po fakultetima
 const FACULTY_PROGRAMS = {
   EF: ["spFIR", "spSMDP"], // FIR + SMiDP
   FTN: ["spRI"], // RI
   BF: ["spEP"], // EP
   FTUG: ["spTUG"], // TUG
 };
+
+// Godine i studijski programi za matricu broja studenata
+const YEARS = [1, 2, 3, 4];
+const PROGRAM_KEYS = ["FIR", "RI", "SMDP", "TUG", "EP"];
 
 function belongsToFaculty(row, facultyId) {
   const keys = FACULTY_PROGRAMS[facultyId] || [];
@@ -30,9 +34,25 @@ function getSubjectKey(r) {
   return `NAME:${(r.subjectName || "").trim().toLowerCase()}`;
 }
 
+// helper za inicijalizaciju matrice broja studenata
+function createEmptyYearProgStudents() {
+  const obj = {};
+  YEARS.forEach((y) => {
+    obj[y] = {};
+    PROGRAM_KEYS.forEach((p) => {
+      obj[y][p] = "";
+    });
+  });
+  return obj;
+}
+
 // grupisanje za UKUPAN pregled – deduplikacija predmeta po profesoru
-// + primjena grupnih podešavanja (groupSettings)
-function buildSummaryGroups(allRows, groupSettings = {}) {
+//  + grupirana logika: broj studenata po godini/SP iz matrice + max u grupi po predmetu
+function buildSummaryGroups(
+  allRows,
+  subjectGroupConfig = {},
+  yearProgStudents = null
+) {
   const map = new Map();
 
   allRows.forEach((r) => {
@@ -63,6 +83,7 @@ function buildSummaryGroups(allRows, groupSettings = {}) {
         spEP: "",
         yearSet: new Set(),
         semesterSet: new Set(),
+        yearProgramPairs: new Set(), // kombinacije godina+SP (npr. "1|FIR")
         lectureHours: 0,
         exerciseHours: 0,
         totalPV: 0,
@@ -73,45 +94,87 @@ function buildSummaryGroups(allRows, groupSettings = {}) {
       g.subjectsMap.set(subjKey, subj);
     }
 
-    // SP X-ice
-    if (r.spFIR) subj.spFIR = "X";
-    if (r.spRI) subj.spRI = "X";
-    if (r.spTUG) subj.spTUG = "X";
-    if (r.spSMDP) subj.spSMDP = "X";
-    if (r.spEP) subj.spEP = "X";
-
-    // Godine / semestri – skupljamo sve jedinstvene
-    if (r.yearNumber != null && r.yearNumber !== "") {
-      subj.yearSet.add(r.yearNumber);
+    // Programi + X i parovi (godina, program)
+    const year = r.yearNumber;
+    const programs = [];
+    if (r.spFIR) {
+      subj.spFIR = "X";
+      programs.push("FIR");
     }
+    if (r.spRI) {
+      subj.spRI = "X";
+      programs.push("RI");
+    }
+    if (r.spTUG) {
+      subj.spTUG = "X";
+      programs.push("TUG");
+    }
+    if (r.spSMDP) {
+      subj.spSMDP = "X";
+      programs.push("SMDP");
+    }
+    if (r.spEP) {
+      subj.spEP = "X";
+      programs.push("EP");
+    }
+
+    if (year != null && year !== "") {
+      subj.yearSet.add(year);
+      programs.forEach((p) => {
+        subj.yearProgramPairs.add(`${year}|${p}`);
+      });
+    }
+
     if (r.semester != null && r.semester !== "") {
       subj.semesterSet.add(r.semester);
     }
 
-    // Zbir sati
-    subj.lectureHours += Number(r.lectureHours || 0);
-    subj.exerciseHours += Number(r.exerciseHours || 0);
-    subj.totalPV += Number(r.totalPV || 0);
-    subj.totalWeighted += Number(r.totalWeighted || 0);
-    subj.weekly += Number(r.weekly || 0);
+    // Sati – NE sabiramo po SP, već uzimamo maksimum (isti predmet na više SP)
+    const L = Number(r.lectureHours || 0);
+    const E = Number(r.exerciseHours || 0);
+    const TPV = Number(r.totalPV || 0);
+    const TW = Number(r.totalWeighted || 0);
+    const W = Number(r.weekly || 0);
+
+    subj.lectureHours = Math.max(subj.lectureHours, L);
+    subj.exerciseHours = Math.max(subj.exerciseHours, E);
+    subj.totalPV = Math.max(subj.totalPV, TPV);
+    subj.totalWeighted = Math.max(subj.totalWeighted, TW);
+    subj.weekly = Math.max(subj.weekly, W);
 
     if (r.opterecenjePremaNormama != null) {
       subj.opterecenjePremaNormama = r.opterecenjePremaNormama;
     }
   });
 
+  // pretvaranje u listu sa primjenjenim brojem grupa
   return Array.from(map.values()).map((g) => ({
     professor: g.professor,
     subjects: Array.from(g.subjectsMap.values()).map((s) => {
-      // koliko je grupa za ovaj predmet (iz taba "Grupe")
+      // broj studenata za ovaj predmet – sumira sve (godina,SP) iz matrice
+      let studentsTotal = 0;
+      if (
+        yearProgStudents &&
+        s.yearProgramPairs &&
+        s.yearProgramPairs.size > 0
+      ) {
+        s.yearProgramPairs.forEach((yp) => {
+          const [yearStr, progCode] = yp.split("|");
+          const yearKey = String(yearStr);
+          const val = yearProgStudents[yearKey]?.[progCode];
+          const num = Number(val || 0);
+          if (!Number.isNaN(num)) {
+            studentsTotal += num;
+          }
+        });
+      }
+
+      const conf = subjectGroupConfig[s.subjectKey];
+      const maxPerGroup = Number(conf?.maxPerGroup || 0);
+
       let groupsCount = 1;
-      const conf = groupSettings[s.subjectKey];
-      if (conf) {
-        const students = Number(conf.students);
-        const maxPerGroup = Number(conf.maxPerGroup);
-        if (students > 0 && maxPerGroup > 0) {
-          groupsCount = Math.ceil(students / maxPerGroup);
-        }
+      if (studentsTotal > 0 && maxPerGroup > 0) {
+        groupsCount = Math.ceil(studentsTotal / maxPerGroup);
       }
 
       return {
@@ -135,29 +198,8 @@ function buildSummaryGroups(allRows, groupSettings = {}) {
   }));
 }
 
-// grupisanje za pojedinačne fakulte (bez deduplikacije predmeta) – koristimo samo za Excel
-function buildFacultyGroups(rowsForFaculty) {
-  const map = new Map();
-  rowsForFaculty.forEach((r) => {
-    const key = r.professorId || r.professorName || "unknown";
-    if (!map.has(key)) {
-      map.set(key, {
-        professor: {
-          name: r.professorName,
-          titleLabel: r.professorTitleLabel,
-          engagementLabel: r.engagementLabel,
-        },
-        subjects: [],
-      });
-    }
-    map.get(key).subjects.push(r);
-  });
-  return Array.from(map.values());
-}
-
-// helper: kreiranje jednog sheet-a iz grupisanih podataka
-// ako se proslijedi groupSettings, onda se i ovdje skaliraju sati po broju grupa
-function createSheetFromGroups(groups, titleForInfoRow, groupSettings) {
+// helper: kreiranje jednog sheet-a iz grupisanih podataka (već agregirani podaci)
+function createSheetFromGroups(groups, titleForInfoRow) {
   const header = [
     "Ime i prezime",
     "Naučno zvanje",
@@ -180,36 +222,14 @@ function createSheetFromGroups(groups, titleForInfoRow, groupSettings) {
 
   const data = [];
 
-  // prvi red – info o sheet-u (nije obavezno, ali pomaže)
   if (titleForInfoRow) {
     data.push([titleForInfoRow]);
   }
 
-  // header
   data.push(header);
 
   groups.forEach((g) => {
     g.subjects.forEach((r, idx) => {
-      let multiplier = 1;
-
-      if (groupSettings) {
-        const subjKey = getSubjectKey(r);
-        const conf = groupSettings[subjKey];
-        if (conf) {
-          const students = Number(conf.students);
-          const maxPerGroup = Number(conf.maxPerGroup);
-          if (students > 0 && maxPerGroup > 0) {
-            multiplier = Math.ceil(students / maxPerGroup);
-          }
-        }
-      }
-
-      const lecture = Number(r.lectureHours || 0) * multiplier;
-      const exercise = Number(r.exerciseHours || 0) * multiplier;
-      const totalPV = Number(r.totalPV || 0) * multiplier;
-      const totalWeighted = Number(r.totalWeighted || 0) * multiplier;
-      const weekly = Number(r.weekly || 0) * multiplier;
-
       data.push([
         idx === 0 ? (g.professor.name || "—") : "",
         idx === 0 ? (g.professor.titleLabel || "") : "",
@@ -224,11 +244,11 @@ function createSheetFromGroups(groups, titleForInfoRow, groupSettings) {
         r.spEP || "",
         r.yearNumber ?? "",
         r.semester ?? "",
-        lecture,
-        exercise,
-        totalPV,
-        totalWeighted,
-        weekly,
+        Number(r.lectureHours || 0),
+        Number(r.exerciseHours || 0),
+        Number(r.totalPV || 0),
+        Number(r.totalWeighted || 0),
+        Number(r.weekly || 0),
         r.opterecenjePremaNormama == null
           ? ""
           : r.opterecenjePremaNormama,
@@ -238,7 +258,6 @@ function createSheetFromGroups(groups, titleForInfoRow, groupSettings) {
 
   const ws = XLSX.utils.aoa_to_sheet(data);
 
-  // širine kolona
   ws["!cols"] = [
     { wch: 30 }, // ime
     { wch: 20 }, // zvanje
@@ -259,7 +278,6 @@ function createSheetFromGroups(groups, titleForInfoRow, groupSettings) {
     { wch: 20 }, // opterećenje
   ];
 
-  // stil za header
   const headerStyle = {
     font: { bold: true },
     alignment: { horizontal: "center", vertical: "center" },
@@ -291,8 +309,13 @@ export default function TeacherLoad() {
   const [msg, setMsg] = useState(null);
   const [activeView, setActiveView] = useState("SUMMARY");
 
-  // podešavanja za grupe po predmetu: { [subjectKey]: { students, maxPerGroup } }
-  const [groupSettings, setGroupSettings] = useState({});
+  // podešavanja za max u grupi po predmetu: { [subjectKey]: { maxPerGroup } }
+  const [subjectGroupConfig, setSubjectGroupConfig] = useState({});
+
+  // broj studenata po (godina, studijski program)
+  const [yearProgStudents, setYearProgStudents] = useState(() =>
+    createEmptyYearProgStudents()
+  );
 
   useEffect(() => {
     (async () => {
@@ -312,14 +335,15 @@ export default function TeacherLoad() {
     })();
   }, []);
 
-  // UKUPAN PREGLED – grupisano po profesoru + predmetu, deduplikacija predmeta
-  // i primijenjena podešavanja iz taba "Grupe"
+  // UKUPAN PREGLED – grupisano po profesoru + predmetu, bez dupliranja po SP,
+  // i sa primjenjenim brojem grupa (iz yearProgStudents + subjectGroupConfig)
   const summaryGroups = useMemo(() => {
     if (!rows.length) return [];
-    return buildSummaryGroups(rows, groupSettings);
-  }, [rows, groupSettings]);
+    return buildSummaryGroups(rows, subjectGroupConfig, yearProgStudents);
+  }, [rows, subjectGroupConfig, yearProgStudents]);
 
   // Tabela "Grupe" – lista svih predmeta (deduplikacija po predmetu)
+  // + info: godine, SP, broj studenata (iz gornje matrice)
   const groupSubjects = useMemo(() => {
     const map = new Map();
 
@@ -327,36 +351,91 @@ export default function TeacherLoad() {
       const subjKey = getSubjectKey(r);
       if (!subjKey) return;
 
-      if (!map.has(subjKey)) {
-        map.set(subjKey, {
+      let entry = map.get(subjKey);
+      if (!entry) {
+        entry = {
           key: subjKey,
           subjectName: r.subjectName,
           subjectCode: r.subjectCode,
           professors: new Set(),
+          yearSet: new Set(),
+          programSet: new Set(),
+          yearProgramPairs: new Set(),
+        };
+        map.set(subjKey, entry);
+      }
+
+      if (r.professorName) entry.professors.add(r.professorName);
+
+      const year = r.yearNumber;
+      const programs = [];
+      if (r.spFIR) {
+        entry.programSet.add("FIR");
+        programs.push("FIR");
+      }
+      if (r.spRI) {
+        entry.programSet.add("RI");
+        programs.push("RI");
+      }
+      if (r.spSMDP) {
+        entry.programSet.add("SMDP");
+        programs.push("SMDP");
+      }
+      if (r.spTUG) {
+        entry.programSet.add("TUG");
+        programs.push("TUG");
+      }
+      if (r.spEP) {
+        entry.programSet.add("EP");
+        programs.push("EP");
+      }
+
+      if (year != null && year !== "") {
+        entry.yearSet.add(year);
+        programs.forEach((p) => {
+          entry.yearProgramPairs.add(`${year}|${p}`);
         });
       }
-      const entry = map.get(subjKey);
-      if (r.professorName) entry.professors.add(r.professorName);
     });
 
-    const list = Array.from(map.values()).map((e) => ({
-      key: e.key,
-      subjectName: e.subjectName,
-      subjectCode: e.subjectCode,
-      professors: Array.from(e.professors),
-    }));
+    const list = Array.from(map.values()).map((e) => {
+      // izračun broja studenata iz yearProgStudents
+      let studentsTotal = 0;
+      if (yearProgStudents && e.yearProgramPairs.size > 0) {
+        e.yearProgramPairs.forEach((yp) => {
+          const [yearStr, progCode] = yp.split("|");
+          const yearKey = String(yearStr);
+          const val = yearProgStudents[yearKey]?.[progCode];
+          const num = Number(val || 0);
+          if (!Number.isNaN(num)) {
+            studentsTotal += num;
+          }
+        });
+      }
 
-    // sort po nazivu predmeta
+      return {
+        key: e.key,
+        subjectName: e.subjectName,
+        subjectCode: e.subjectCode,
+        professors: Array.from(e.professors),
+        yearsText: Array.from(e.yearSet)
+          .sort((a, b) => Number(a) - Number(b))
+          .join(", "),
+        programsText: Array.from(e.programSet).join(", "),
+        studentsTotal,
+      };
+    });
+
     list.sort((a, b) =>
       (a.subjectName || "").localeCompare(b.subjectName || "", "hr")
     );
     return list;
-  }, [rows]);
+  }, [rows, yearProgStudents]);
 
   const activeLabel =
     VIEW_TABS.find((t) => t.id === activeView)?.label || "";
 
-  // Download Excel – sheet "Ukupno" (sa grupama) + sheet-ovi po fakultetima (EF, FTN, BF, FTUG)
+  // Download Excel – sheet "Ukupno" + EF/FTN/BF/FTUG, sve sa istom logikom
   async function downloadExcel() {
     if (!rows.length) {
       setMsg({
@@ -369,52 +448,67 @@ export default function TeacherLoad() {
     try {
       const wb = XLSX.utils.book_new();
 
-      // 1) Ukupno – već grupisano i skalirano prema groupSettings
-      const summary = buildSummaryGroups(rows, groupSettings);
+      // 1) Ukupno (svi SP)
+      const summary = buildSummaryGroups(
+        rows,
+        subjectGroupConfig,
+        yearProgStudents
+      );
       const wsSummary = createSheetFromGroups(
         summary,
-        "Ukupan pregled opterećenja (svi studijski programi)",
-        null // ovdje NE skaliramo ponovo – već je urađeno u buildSummaryGroups
+        "Ukupan pregled opterećenja (svi studijski programi)"
       );
       XLSX.utils.book_append_sheet(wb, wsSummary, "Ukupno");
 
       // 2) EF
       const efRows = rows.filter((r) => belongsToFaculty(r, "EF"));
-      const efGroups = buildFacultyGroups(efRows);
+      const efGroups = buildSummaryGroups(
+        efRows,
+        subjectGroupConfig,
+        yearProgStudents
+      );
       const wsEF = createSheetFromGroups(
         efGroups,
-        "Ekonomski fakultet (FIR, SMiDP)",
-        groupSettings
+        "Ekonomski fakultet (FIR, SMiDP)"
       );
       XLSX.utils.book_append_sheet(wb, wsEF, "EF");
 
       // 3) FTN
       const ftnRows = rows.filter((r) => belongsToFaculty(r, "FTN"));
-      const ftnGroups = buildFacultyGroups(ftnRows);
+      const ftnGroups = buildSummaryGroups(
+        ftnRows,
+        subjectGroupConfig,
+        yearProgStudents
+      );
       const wsFTN = createSheetFromGroups(
         ftnGroups,
-        "Fakultet tehničkih nauka (RI)",
-        groupSettings
+        "Fakultet tehničkih nauka (RI)"
       );
       XLSX.utils.book_append_sheet(wb, wsFTN, "FTN");
 
       // 4) BF
       const bfRows = rows.filter((r) => belongsToFaculty(r, "BF"));
-      const bfGroups = buildFacultyGroups(bfRows);
+      const bfGroups = buildSummaryGroups(
+        bfRows,
+        subjectGroupConfig,
+        yearProgStudents
+      );
       const wsBF = createSheetFromGroups(
         bfGroups,
-        "Biotehnički fakultet (EP)",
-        groupSettings
+        "Biotehnički fakultet (EP)"
       );
       XLSX.utils.book_append_sheet(wb, wsBF, "BF");
 
       // 5) FTUG
       const ftugRows = rows.filter((r) => belongsToFaculty(r, "FTUG"));
-      const ftugGroups = buildFacultyGroups(ftugRows);
+      const ftugGroups = buildSummaryGroups(
+        ftugRows,
+        subjectGroupConfig,
+        yearProgStudents
+      );
       const wsFTUG = createSheetFromGroups(
         ftugGroups,
-        "Fakultet turizma, ugostiteljstva i gastronomije (TUG)",
-        groupSettings
+        "Fakultet turizma, ugostiteljstva i gastronomije (TUG)"
       );
       XLSX.utils.book_append_sheet(wb, wsFTUG, "FTUG");
 
@@ -481,97 +575,130 @@ export default function TeacherLoad() {
       {loading ? (
         <div>Učitavanje opterećenja…</div>
       ) : activeView === "GROUPS" ? (
-        // ===== TAB: GRUPE =====
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Predmet</th>
-              <th>Nastavnici</th>
-              <th>Broj studenata</th>
-              <th>Max u grupi</th>
-              <th>Broj grupa</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groupSubjects.length === 0 ? (
-              <tr>
-                <td colSpan={5}>Nema podataka za prikaz.</td>
-              </tr>
-            ) : (
-              groupSubjects.map((s) => {
-                const settings = groupSettings[s.key] || {};
-                const studentsVal =
-                  settings.students !== undefined
-                    ? settings.students
-                    : "";
-                const maxVal =
-                  settings.maxPerGroup !== undefined
-                    ? settings.maxPerGroup
-                    : "";
-
-                const studentsNum = Number(studentsVal);
-                const maxNum = Number(maxVal);
-                const groupsCount =
-                  studentsNum > 0 && maxNum > 0
-                    ? Math.ceil(studentsNum / maxNum)
-                    : "";
-
-                return (
-                  <tr key={s.key}>
-                    <td>
-                      {s.subjectName}
-                      {s.subjectCode ? ` (${s.subjectCode})` : ""}
-                    </td>
-                    <td>
-                      {s.professors && s.professors.length
-                        ? s.professors.join(", ")
-                        : "—"}
-                    </td>
-                    <td>
-                      <input
-                        className="input small"
-                        type="number"
-                        min={0}
-                        value={studentsVal}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGroupSettings((prev) => ({
-                            ...prev,
-                            [s.key]: {
-                              ...(prev[s.key] || {}),
-                              students: val,
-                            },
-                          }));
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        className="input small"
-                        type="number"
-                        min={0}
-                        value={maxVal}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setGroupSettings((prev) => ({
-                            ...prev,
-                            [s.key]: {
-                              ...(prev[s.key] || {}),
-                              maxPerGroup: val,
-                            },
-                          }));
-                        }}
-                      />
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      {groupsCount}
-                    </td>
+        <>
+          {/* GORNJA TABELA – broj studenata po godinama i SP */}
+          <div style={{ marginBottom: 16 }}>
+            <h3>Broj studenata po godinama i studijskim programima</h3>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Godina</th>
+                  <th>FIR</th>
+                  <th>RI</th>
+                  <th>SMiDP</th>
+                  <th>TUG</th>
+                  <th>EP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {YEARS.map((year) => (
+                  <tr key={year}>
+                    <td>{year}. godina</td>
+                    {PROGRAM_KEYS.map((prog) => (
+                      <td key={prog}>
+                        <input
+                          className="input small"
+                          type="number"
+                          min={0}
+                          value={
+                            yearProgStudents[year]?.[prog] ?? ""
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setYearProgStudents((prev) => ({
+                              ...prev,
+                              [year]: {
+                                ...(prev[year] || {}),
+                                [prog]: val,
+                              },
+                            }));
+                          }}
+                        />
+                      </td>
+                    ))}
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* DONJA TABELA – predmeti + izračunati broj studenata + max u grupi */}
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Predmet</th>
+                <th>Godina</th>
+                <th>Studijski programi</th>
+                <th>Nastavnici</th>
+                <th>Broj studenata</th>
+                <th>Max u grupi</th>
+                <th>Broj grupa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupSubjects.length === 0 ? (
+                <tr>
+                  <td colSpan={7}>Nema podataka za prikaz.</td>
+                </tr>
+              ) : (
+                groupSubjects.map((s) => {
+                  const conf = subjectGroupConfig[s.key] || {};
+                  const maxVal =
+                    conf.maxPerGroup !== undefined
+                      ? conf.maxPerGroup
+                      : "";
+
+                  const studentsTotal = s.studentsTotal || 0;
+                  const maxNum = Number(maxVal);
+                  const groupsCount =
+                    studentsTotal > 0 && maxNum > 0
+                      ? Math.ceil(studentsTotal / maxNum)
+                      : "";
+
+                  return (
+                    <tr key={s.key}>
+                      <td>
+                        {s.subjectName}
+                        {s.subjectCode ? ` (${s.subjectCode})` : ""}
+                      </td>
+                      <td>{s.yearsText}</td>
+                      <td>{s.programsText}</td>
+                      <td>
+                        {s.professors && s.professors.length
+                          ? s.professors.join(", ")
+                          : "—"}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {studentsTotal || ""}
+                      </td>
+                      <td>
+                        <input
+                          className="input small"
+                          type="number"
+                          min={0}
+                          value={maxVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSubjectGroupConfig((prev) => ({
+                              ...prev,
+                              [s.key]: {
+                                ...(prev[s.key] || {}),
+                                maxPerGroup: val,
+                              },
+                            }));
+                          }}
+                        />
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {groupsCount}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </>
       ) : (
         // ===== TAB: UKUPAN PREGLED =====
         <table className="table">
