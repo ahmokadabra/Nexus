@@ -22,11 +22,26 @@ const YEARS = [1, 2, 3, 4];
 const PROGRAM_KEYS = ["FIR", "RI", "SMDP", "TUG", "EP"];
 const WEEKS_PER_SEMESTER = 15;
 
-// asistent / viši asistent -> V se računa 1:1, ostali -> 0.5
+// localStorage ključevi
+const LS_KEY_YEAR_STUDENTS = "teacherload.yearProgStudents";
+const LS_KEY_SUBJECT_GROUPS = "teacherload.subjectGroupConfig";
+
+// asistent / viši asistent / stručnjak iz prakse -> V se računa 1:1, ostali -> 0.5
 function isAssistantTitle(titleLabel) {
   if (!titleLabel) return false;
   const t = String(titleLabel).toLowerCase();
-  return t.includes("asistent"); // pokriva "asistent" i "viši asistent"
+  const plain = t
+    .replace(/č/g, "c")
+    .replace(/ć/g, "c")
+    .replace(/š/g, "s")
+    .replace(/đ/g, "d")
+    .replace(/ž/g, "z");
+
+  return (
+    t.includes("asistent") ||
+    t.includes("stručnjak iz prakse") ||
+    plain.includes("strucnjak iz prakse")
+  );
 }
 
 function belongsToFaculty(row, facultyId) {
@@ -54,9 +69,33 @@ function createEmptyYearProgStudents() {
   return obj;
 }
 
+// primjena debljih obruba oko blokova nastavnika u Excelu
+function applyGroupBorders(ws, rowStart, rowEnd, maxCol) {
+  const BORDER_MED = { style: "medium", color: { rgb: "FF111827" } };
+
+  for (let c = 0; c <= maxCol; c++) {
+    const topAddr = XLSX.utils.encode_cell({ r: rowStart, c });
+    const bottomAddr = XLSX.utils.encode_cell({ r: rowEnd, c });
+
+    const topCell = ws[topAddr];
+    if (topCell) {
+      topCell.s = topCell.s || {};
+      topCell.s.border = topCell.s.border || {};
+      topCell.s.border.top = BORDER_MED;
+    }
+
+    const bottomCell = ws[bottomAddr];
+    if (bottomCell) {
+      bottomCell.s = bottomCell.s || {};
+      bottomCell.s.border = bottomCell.s.border || {};
+      bottomCell.s.border.bottom = BORDER_MED;
+    }
+  }
+}
+
 // grupisanje za UKUPAN pregled – deduplikacija predmeta po profesoru
 //  + logika grupa (yearProgStudents + subjectGroupConfig)
-//  + nova logika za P + 0.5V / P + 1V za asistente
+//  + P + 0.5V / P + 1V za asistente i stručnjake iz prakse
 function buildSummaryGroups(
   allRows,
   subjectGroupConfig = {},
@@ -146,7 +185,7 @@ function buildSummaryGroups(
     }
   });
 
-  // pretvaranje u listu sa primjenjenim brojem grupa i novom P+0.5V logikom
+  // pretvaranje u listu sa primjenjenim brojem grupa i P+0.5V / P+1V logikom
   return Array.from(map.values()).map((g) => {
     const isAssistant = isAssistantTitle(g.professor.titleLabel);
 
@@ -317,6 +356,33 @@ function createSheetFromGroups(groups, titleForInfoRow) {
     }
   }
 
+  // Deblji obrubi oko blokova svakog nastavnika (na osnovu kolone "Ime i prezime")
+  const ref = ws["!ref"];
+  if (ref) {
+    const range = XLSX.utils.decode_range(ref);
+    const firstDataRow = titleForInfoRow ? 2 : 1; // 0-based: title, header
+
+    let currentStart = null;
+    for (let r = firstDataRow; r <= range.e.r; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c: 0 });
+      const cell = ws[addr];
+      const hasName =
+        cell && cell.v != null && String(cell.v).trim() !== "";
+      if (hasName) {
+        if (currentStart === null) {
+          currentStart = r;
+        } else {
+          // zatvaramo prethodnu grupu
+          applyGroupBorders(ws, currentStart, r - 1, range.e.c);
+          currentStart = r;
+        }
+      }
+    }
+    if (currentStart !== null) {
+      applyGroupBorders(ws, currentStart, range.e.r, range.e.c);
+    }
+  }
+
   return ws;
 }
 
@@ -352,16 +418,65 @@ export default function TeacherLoad() {
     })();
   }, []);
 
-  // UKUPAN PREGLED – grupisano po profesoru + predmetu, bez dupliranja po SP,
-  // i sa primjenjenim brojem grupa (iz yearProgStudents + subjectGroupConfig)
-  // i novom P+0.5V / P+1V logikom
+  // učitaj sačuvane vrijednosti za grupe iz localStorage-a
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const savedYear = window.localStorage.getItem(
+        LS_KEY_YEAR_STUDENTS
+      );
+      const savedSubj = window.localStorage.getItem(
+        LS_KEY_SUBJECT_GROUPS
+      );
+      if (savedYear) {
+        const parsed = JSON.parse(savedYear);
+        if (parsed && typeof parsed === "object") {
+          setYearProgStudents(parsed);
+        }
+      }
+      if (savedSubj) {
+        const parsed = JSON.parse(savedSubj);
+        if (parsed && typeof parsed === "object") {
+          setSubjectGroupConfig(parsed);
+        }
+      }
+    } catch (e) {
+      console.error("Greška pri učitavanju lokalno sačuvanih grupa", e);
+    }
+  }, []);
+
+  // snimi podešavanja grupa u localStorage
+  function saveGroupsConfig() {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          LS_KEY_YEAR_STUDENTS,
+          JSON.stringify(yearProgStudents)
+        );
+        window.localStorage.setItem(
+          LS_KEY_SUBJECT_GROUPS,
+          JSON.stringify(subjectGroupConfig)
+        );
+      }
+      setMsg({
+        type: "ok",
+        text: "Podešavanja grupa su sačuvana.",
+      });
+    } catch (e) {
+      setMsg({
+        type: "err",
+        text: "Greška pri čuvanju podešavanja grupa.",
+      });
+    }
+  }
+
+  // UKUPAN PREGLED
   const summaryGroups = useMemo(() => {
     if (!rows.length) return [];
     return buildSummaryGroups(rows, subjectGroupConfig, yearProgStudents);
   }, [rows, subjectGroupConfig, yearProgStudents]);
 
   // Tabela "Grupe" – lista svih predmeta (deduplikacija po predmetu)
-  // + info: godine, SP, broj studenata (iz gornje matrice)
   const groupSubjects = useMemo(() => {
     const map = new Map();
 
@@ -453,7 +568,7 @@ export default function TeacherLoad() {
   const activeLabel =
     VIEW_TABS.find((t) => t.id === activeView)?.label || "";
 
-  // Download Excel – sheet "Ukupno" + EF/FTN/BF/FTUG, sve sa istom logikom (grupe + P+0.5V/1V)
+  // Download Excel – sheet "Ukupno" + EF/FTN/BF/FTUG
   async function downloadExcel() {
     if (!rows.length) {
       setMsg({
@@ -594,9 +709,23 @@ export default function TeacherLoad() {
         <div>Učitavanje opterećenja…</div>
       ) : activeView === "GROUPS" ? (
         <>
-          {/* GORNJA TABELA – broj studenata po godinama i SP */}
+          {/* GORNJA TABELA – broj studenata po godinama i SP + SAVE */}
           <div style={{ marginBottom: 16 }}>
-            <h3>Broj studenata po godinama i studijskim programima</h3>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 8,
+              }}
+            >
+              <h3 style={{ margin: 0 }}>
+                Broj studenata po godinama i studijskim programima
+              </h3>
+              <button className="btn" onClick={saveGroupsConfig}>
+                Sačuvaj
+              </button>
+            </div>
             <table className="table">
               <thead>
                 <tr>
@@ -780,114 +909,201 @@ export default function TeacherLoad() {
                   }
                 );
 
+                const groupTopBorderStyle = {
+                  borderTop: "2px solid #4b5563",
+                };
+                const groupBottomBorderStyle = {
+                  borderBottom: "2px solid #4b5563",
+                };
+
                 return (
                   <React.Fragment key={gi}>
-                    {g.subjects.map((r, idx) => (
-                      <tr
-                        key={`${gi}-${idx}-${
-                          r.subjectCode || r.subjectName || "row"
-                        }`}
-                      >
-                        {/* Ime i prezime (spojena ćelija po profesoru) */}
-                        <td
-                          rowSpan={
-                            idx === 0 ? g.subjects.length : 1
-                          }
-                          style={
-                            idx === 0 ? {} : { display: "none" }
-                          }
+                    {g.subjects.map((r, idx) => {
+                      const topBorder =
+                        idx === 0 ? groupTopBorderStyle : {};
+                      return (
+                        <tr
+                          key={`${gi}-${idx}-${
+                            r.subjectCode || r.subjectName || "row"
+                          }`}
                         >
-                          {g.professor.name || "—"}
-                        </td>
+                          {/* Ime i prezime (spojena ćelija po profesoru) */}
+                          <td
+                            rowSpan={
+                              idx === 0 ? g.subjects.length : 1
+                            }
+                            style={
+                              idx === 0
+                                ? { ...topBorder }
+                                : { display: "none" }
+                            }
+                          >
+                            {g.professor.name || "—"}
+                          </td>
 
-                        {/* Naučno zvanje */}
-                        <td
-                          rowSpan={
-                            idx === 0 ? g.subjects.length : 1
-                          }
-                          style={
-                            idx === 0 ? {} : { display: "none" }
-                          }
-                        >
-                          {g.professor.titleLabel || ""}
-                        </td>
+                          {/* Naučno zvanje */}
+                          <td
+                            rowSpan={
+                              idx === 0 ? g.subjects.length : 1
+                            }
+                            style={
+                              idx === 0
+                                ? { ...topBorder }
+                                : { display: "none" }
+                            }
+                          >
+                            {g.professor.titleLabel || ""}
+                          </td>
 
-                        {/* Radni status (RO / VS) */}
-                        <td
-                          rowSpan={
-                            idx === 0 ? g.subjects.length : 1
-                          }
-                          style={
-                            idx === 0 ? {} : { display: "none" }
-                          }
-                        >
-                          {g.professor.engagementLabel || ""}
-                        </td>
+                          {/* Radni status (RO / VS) */}
+                          <td
+                            rowSpan={
+                              idx === 0 ? g.subjects.length : 1
+                            }
+                            style={
+                              idx === 0
+                                ? { ...topBorder }
+                                : { display: "none" }
+                            }
+                          >
+                            {g.professor.engagementLabel || ""}
+                          </td>
 
-                        {/* Predmet */}
-                        <td>
-                          {r.subjectName}
-                          {r.subjectCode ? ` (${r.subjectCode})` : ""}
-                        </td>
+                          {/* Predmet */}
+                          <td style={{ ...topBorder }}>
+                            {r.subjectName}
+                            {r.subjectCode
+                              ? ` (${r.subjectCode})`
+                              : ""}
+                          </td>
 
-                        {/* Studijski programi – X gdje pripada */}
-                        <td style={{ textAlign: "center" }}>
-                          {r.spFIR || ""}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {r.spRI || ""}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {r.spTUG || ""}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {r.spSMDP || ""}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {r.spEP || ""}
-                        </td>
+                          {/* Studijski programi – X gdje pripada */}
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.spFIR || ""}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.spRI || ""}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.spTUG || ""}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.spSMDP || ""}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.spEP || ""}
+                          </td>
 
-                        {/* Godina i semestar */}
-                        <td style={{ textAlign: "center" }}>
-                          {r.yearNumber}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {r.semester}
-                        </td>
+                          {/* Godina i semestar */}
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.yearNumber}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.semester}
+                          </td>
 
-                        {/* Sati – već skalirani prema broju grupa i novoj P+0.5V/1V logici */}
-                        <td style={{ textAlign: "right" }}>
-                          {r.lectureHours}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {r.exerciseHours}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {r.totalPV}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {Number(r.totalWeighted || 0).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {Number(r.weekly || 0).toFixed(2)}
-                        </td>
+                          {/* Sati */}
+                          <td
+                            style={{
+                              textAlign: "right",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.lectureHours}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "right",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.exerciseHours}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "right",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.totalPV}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "right",
+                              ...topBorder,
+                            }}
+                          >
+                            {Number(
+                              r.totalWeighted || 0
+                            ).toFixed(2)}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: "right",
+                              ...topBorder,
+                            }}
+                          >
+                            {Number(r.weekly || 0).toFixed(2)}
+                          </td>
 
-                        {/* Opterećenje prema normama */}
-                        <td style={{ textAlign: "center" }}>
-                          {r.opterecenjePremaNormama == null
-                            ? ""
-                            : r.opterecenjePremaNormama}
-                        </td>
-                      </tr>
-                    ))}
+                          {/* Opterećenje prema normama */}
+                          <td
+                            style={{
+                              textAlign: "center",
+                              ...topBorder,
+                            }}
+                          >
+                            {r.opterecenjePremaNormama == null
+                              ? ""
+                              : r.opterecenjePremaNormama}
+                          </td>
+                        </tr>
+                      );
+                    })}
 
-                    {/* RED "UKUPNO" ZA PROFESORA */}
+                    {/* RED "UKUPNO" ZA PROFESORA – donja deblja linija */}
                     <tr>
                       <td
                         colSpan={11}
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         Ukupno:
@@ -896,6 +1112,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.lecture}
@@ -904,6 +1121,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.exercise}
@@ -912,6 +1130,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.pv}
@@ -920,6 +1139,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.weighted.toFixed(2)}
@@ -928,6 +1148,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "right",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.weekly.toFixed(2)}
@@ -936,6 +1157,7 @@ export default function TeacherLoad() {
                         style={{
                           textAlign: "center",
                           fontWeight: 600,
+                          ...groupBottomBorderStyle,
                         }}
                       >
                         {totals.hasNorme ? totals.norme : ""}
